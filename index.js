@@ -23,6 +23,7 @@ const defaultSettings = {
     target: "character_main",
     detectionMode: "auto",
     manualCharacters: "",
+    excludeNames: "",
     excludeUser: true,
     
     updateThreshold: 20,
@@ -121,27 +122,34 @@ function detectCharacters() {
     
     const characterMap = new Map();
     const userName = context.name1 || '用户';
-    const mainCharName = context.name2 || '角色';  // 角色卡名字，需要排除
+    const mainCharName = context.name2 || '角色';
+    
+    // 获取排除列表
+    const excludeList = (settings.excludeNames || '')
+        .split(',')
+        .map(n => n.trim())
+        .filter(Boolean);
+    
+    console.log('[角色日志] 排除列表:', excludeList);
+    console.log('[角色日志] 用户名:', userName);
+    console.log('[角色日志] 角色卡名:', mainCharName);
     
     chat.forEach(msg => {
-        // 跳过用户消息
-        if (msg.is_user && settings.excludeUser) {
-            return;
-        }
-        
         // 获取消息发送者名字
-        let name = msg.is_user ? userName : msg.name;
+        let name = msg.is_user ? userName : (msg.name || mainCharName);
+        
+        if (!name) return;
         
         // 提取【】中的名字（如【折枝】→折枝）
-        if (name && name.includes('【') && name.includes('】')) {
+        if (name.includes('【') && name.includes('】')) {
             const match = name.match(/【([^】]+)】/);
             if (match) {
                 name = match[1];
             }
         }
         
-        // 排除：没有名字的消息 和 角色卡本身
-        if (!name || name === mainCharName) {
+        // 检查是否在排除列表中
+        if (excludeList.includes(name)) {
             return;
         }
         
@@ -156,7 +164,10 @@ function detectCharacters() {
         }
     });
     
-    return Array.from(characterMap.values());
+    const detected = Array.from(characterMap.values());
+    console.log('[角色日志] 检测到的角色:', detected.map(c => `${c.name}(${c.count})`));
+    
+    return detected;
 }
 
 // 获取要跟踪的角色列表
@@ -607,6 +618,7 @@ function loadSettings() {
     $('#cj_target').val(settings.target);
     $('#cj_detection_mode').val(settings.detectionMode);
     $('#cj_manual_characters').val(settings.manualCharacters);
+    $('#cj_exclude_names').val(settings.excludeNames || '');
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
     
     $('#cj_update_threshold').val(settings.updateThreshold);
@@ -639,6 +651,7 @@ function saveSettings() {
     settings.target = $('#cj_target').val();
     settings.detectionMode = $('#cj_detection_mode').val();
     settings.manualCharacters = $('#cj_manual_characters').val();
+    settings.excludeNames = $('#cj_exclude_names').val();
     settings.excludeUser = $('#cj_exclude_user').prop('checked');
     
     settings.updateThreshold = parseInt($('#cj_update_threshold').val());

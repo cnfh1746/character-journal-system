@@ -53,11 +53,17 @@
         </div>
 
         <div class="character-journal-field">
+            <label for="cj_exclude_names">排除名单（逗号分隔）：</label>
+            <input type="text" id="cj_exclude_names" placeholder="例如: 用户, 鸣潮, 系统">
+            <small>不为这些名字创建日志（可填入用户名、世界名、旁白等）</small>
+        </div>
+
+        <div class="character-journal-field">
             <label>
                 <input type="checkbox" id="cj_exclude_user">
-                排除用户角色
+                自动排除用户角色
             </label>
-            <small>不为用户（你）创建日志条目</small>
+            <small>自动排除当前用户名（已过时，建议使用上面的排除名单）</small>
         </div>
     </div>
 
