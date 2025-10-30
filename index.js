@@ -119,13 +119,6 @@ function detectCharacters() {
     
     if (!chat || chat.length === 0) return [];
     
-    // 需要排除的名称（世界名、系统名等）
-    const excludeNames = new Set([
-        '鸣潮', 'Wuthering Waves', // 世界名
-        '系统', 'System', '旁白', '叙述者', 'Narrator', // 系统角色
-        '未知', 'Unknown', '匿名', 'Anonymous', // 占位符
-    ]);
-    
     const characterMap = new Map();
     const userName = context.name1 || '用户';
     const mainCharName = context.name2 || '角色';
@@ -133,18 +126,7 @@ function detectCharacters() {
     chat.forEach(msg => {
         const name = msg.is_user ? userName : (msg.name || mainCharName);
         
-        // 跳过用户（如果设置了排除用户）
         if (settings.excludeUser && msg.is_user) {
-            return;
-        }
-        
-        // 跳过排除列表中的名称
-        if (excludeNames.has(name)) {
-            return;
-        }
-        
-        // 只统计有实际对话的角色（消息长度>10）
-        if (!msg.mes || msg.mes.trim().length < 10) {
             return;
         }
         
@@ -159,11 +141,7 @@ function detectCharacters() {
         }
     });
     
-    // 过滤掉出场次数太少的（至少1次）
-    const filteredCharacters = Array.from(characterMap.values())
-        .filter(c => c.count >= 1);
-    
-    return filteredCharacters;
+    return Array.from(characterMap.values());
 }
 
 // 获取要跟踪的角色列表
