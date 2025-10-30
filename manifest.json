@@ -1,10 +1,12 @@
 {
-    "name": "Character Journal System",
-    "version": "1.0.0",
     "display_name": "角色日志系统",
-    "description": "为每个角色创建独立的第一人称日志条目，提升角色扮演质量并节省Token",
-    "author": "Your Name",
-    "homepage": "https://github.com/yourusername/character-journal-system",
-    "requires": ["SillyTavern >= 1.11.0"],
+    "loading_order": 10,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "cnfh1746",
+    "version": "1.0.0",
+    "homePage": "https://github.com/cnfh1746/character-journal-system",
     "auto_update": true
 }
