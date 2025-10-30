@@ -2,7 +2,9 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 import { 
     loadWorldInfo, 
-    saveWorldInfo 
+    saveWorldInfo,
+    createNewWorldInfo,
+    createWorldInfoEntry
 } from "../../../world-info.js";
 import { characters } from "../../../../script.js";
 import { eventSource, event_types } from "../../../../script.js";
