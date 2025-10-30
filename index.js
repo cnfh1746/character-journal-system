@@ -26,14 +26,13 @@ const defaultSettings = {
     excludeUser: true,
     
     updateThreshold: 20,
-    journalStyle: "narrative",
     entryLength: "short",
     journalPrompt: `你是记忆记录助手。请为每个角色写一段第一人称日志，记录他们的经历、想法和感受。
 
 要求：
 1. 使用第一人称（我、我的）
 2. 捕捉角色的思想、感受和观察
-3. 保持50-100字
+3. 根据长度设置控制字数（极简50字以内，简短50-100字，适中100-200字，详细200-300字）
 4. 如果角色未出场，写：【本轮未出场】
 
 输出格式：
@@ -41,7 +40,9 @@ const defaultSettings = {
 [Alice的第一人称日志]
 ===角色:Bob===
 [Bob的第一人称日志]
-===END===`,
+===END===
+
+注意：请严格按照指定的角色列表生成日志，不要为列表外的角色生成内容。`,
     
     autoRefine: false,
     refineThreshold: 5000,
@@ -152,7 +153,16 @@ function getTrackedCharacters() {
             .filter(c => c.name);
     }
     
-    return detectCharacters();
+    // 自动检测模式，应用排除用户设置
+    const allCharacters = detectCharacters();
+    
+    if (settings.excludeUser) {
+        const context = getContext();
+        const userName = context.name1 || '用户';
+        return allCharacters.filter(c => c.name !== userName && !c.isUser);
+    }
+    
+    return allCharacters;
 }
 
 // 读取角色日志进度
@@ -567,7 +577,6 @@ function loadSettings() {
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
     
     $('#cj_update_threshold').val(settings.updateThreshold);
-    $('#cj_journal_style').val(settings.journalStyle);
     $('#cj_entry_length').val(settings.entryLength);
     $('#cj_journal_prompt').val(settings.journalPrompt);
     
@@ -600,7 +609,6 @@ function saveSettings() {
     settings.excludeUser = $('#cj_exclude_user').prop('checked');
     
     settings.updateThreshold = parseInt($('#cj_update_threshold').val());
-    settings.journalStyle = $('#cj_journal_style').val();
     settings.entryLength = $('#cj_entry_length').val();
     settings.journalPrompt = $('#cj_journal_prompt').val();
     
