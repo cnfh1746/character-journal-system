@@ -208,7 +208,10 @@
 
         <div class="character-journal-field">
             <label for="cj_api_model">模型名称：</label>
-            <input type="text" id="cj_api_model" placeholder="留空使用ST默认模型">
+            <div style="display: flex; gap: 8px;">
+                <input type="text" id="cj_api_model" placeholder="留空使用ST默认模型" style="flex: 1;">
+                <button class="character-journal-btn" id="cj_fetch_models" style="padding: 8px 12px; white-space: nowrap;">📋 拉取模型</button>
+            </div>
         </div>
 
         <div class="character-journal-field">

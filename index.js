@@ -616,41 +616,49 @@ function saveSettings() {
 
 // 测试API连接
 async function testAPIConnection() {
-    const settings = extension_settings[extensionName];
+    const apiUrl = $('#cj_api_url').val().trim();
+    const apiKey = $('#cj_api_key').val().trim();
     const statusDiv = $('#cj_api_status');
     
     statusDiv.show().html('🔄 正在测试连接...').css('color', '#4a90e2');
     
     try {
-        let apiUrl = settings.api.url.trim();
         if (!apiUrl) {
             statusDiv.html('⚠️ 请先填写API地址').css('color', '#e74c3c');
             return;
         }
         
-        if (!apiUrl.endsWith('/v1/models')) {
-            if (apiUrl.endsWith('/')) {
-                apiUrl = apiUrl.slice(0, -1);
+        let modelsUrl = apiUrl;
+        if (!modelsUrl.endsWith('/v1/models')) {
+            if (modelsUrl.endsWith('/')) {
+                modelsUrl = modelsUrl.slice(0, -1);
             }
-            if (apiUrl.endsWith('/v1')) {
-                apiUrl += '/models';
+            if (modelsUrl.endsWith('/v1')) {
+                modelsUrl += '/models';
+            } else if (modelsUrl.endsWith('/v1/chat/completions')) {
+                modelsUrl = modelsUrl.replace('/v1/chat/completions', '/v1/models');
             } else {
-                apiUrl += '/v1/models';
+                modelsUrl += '/v1/models';
             }
         }
         
-        const response = await fetch(apiUrl, {
+        const response = await fetch(modelsUrl, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${settings.api.key || ''}`
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
             }
         });
         
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
         
-        statusDiv.html('✓ 连接成功！').css('color', '#27ae60');
+        const data = await response.json();
+        const modelCount = data.data ? data.data.length : 0;
+        
+        statusDiv.html(`✓ 连接成功！找到 ${modelCount} 个模型`).css('color', '#27ae60');
         toastr.success('API连接测试成功', '角色日志');
         
         setTimeout(() => {
@@ -660,6 +668,115 @@ async function testAPIConnection() {
         console.error('[角色日志] 测试连接失败:', error);
         statusDiv.html(`✗ 连接失败: ${error.message}`).css('color', '#e74c3c');
         toastr.error(`连接失败: ${error.message}`, '角色日志');
+    }
+}
+
+// 拉取模型列表
+async function fetchModels() {
+    const apiUrl = $('#cj_api_url').val().trim();
+    const apiKey = $('#cj_api_key').val().trim();
+    const modelInput = $('#cj_api_model');
+    
+    if (!apiUrl) {
+        toastr.warning('请先填写API地址', '角色日志');
+        return;
+    }
+    
+    const btn = $('#cj_fetch_models');
+    btn.prop('disabled', true).text('拉取中...');
+    
+    try {
+        let modelsUrl = apiUrl;
+        if (!modelsUrl.endsWith('/v1/models')) {
+            if (modelsUrl.endsWith('/')) {
+                modelsUrl = modelsUrl.slice(0, -1);
+            }
+            if (modelsUrl.endsWith('/v1')) {
+                modelsUrl += '/models';
+            } else if (modelsUrl.endsWith('/v1/chat/completions')) {
+                modelsUrl = modelsUrl.replace('/v1/chat/completions', '/v1/models');
+            } else {
+                modelsUrl += '/v1/models';
+            }
+        }
+        
+        console.log('[角色日志] 拉取模型列表:', modelsUrl);
+        
+        const response = await fetch(modelsUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.data || data.data.length === 0) {
+            toastr.warning('未找到可用模型', '角色日志');
+            return;
+        }
+        
+        // 创建模型选择对话框
+        const models = data.data.map(m => m.id || m.model || m.name).filter(Boolean);
+        console.log('[角色日志] 找到模型:', models);
+        
+        const modalHtml = `
+            <div class="character-journal-modal" id="model_select_modal">
+                <div class="character-journal-modal-content" style="max-width: 600px;">
+                    <div class="character-journal-modal-header">
+                        <h2>选择模型</h2>
+                    </div>
+                    <div class="character-journal-modal-body">
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${models.map(model => `
+                                <div class="character-list-item" style="cursor: pointer; padding: 12px;" data-model="${model}">
+                                    <span style="flex: 1; color: #212121;">${model}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="character-journal-modal-footer">
+                        <button class="character-journal-btn" id="close_model_modal">取消</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('body').append(modalHtml);
+        
+        // 点击模型项选择
+        $('.character-list-item[data-model]').on('click', function() {
+            const selectedModel = $(this).attr('data-model');
+            modelInput.val(selectedModel);
+            $('#model_select_modal').remove();
+            toastr.success(`已选择模型: ${selectedModel}`, '角色日志');
+        });
+        
+        // 关闭按钮
+        $('#close_model_modal').on('click', function() {
+            $('#model_select_modal').remove();
+        });
+        
+        // 点击背景关闭
+        $('#model_select_modal').on('click', function(e) {
+            if (e.target.id === 'model_select_modal') {
+                $(this).remove();
+            }
+        });
+        
+        toastr.success(`找到 ${models.length} 个模型`, '角色日志');
+        
+    } catch (error) {
+        console.error('[角色日志] 拉取模型失败:', error);
+        toastr.error(`拉取模型失败: ${error.message}`, '角色日志');
+    } finally {
+        btn.prop('disabled', false).text('📋 拉取模型');
     }
 }
 
@@ -673,6 +790,9 @@ function setupUIHandlers() {
     
     // 测试连接按钮
     $('#cj_test_api').on('click', testAPIConnection);
+    
+    // 拉取模型按钮
+    $('#cj_fetch_models').on('click', fetchModels);
     
     // 手动更新按钮
     $('#cj_manual_update').on('click', async function() {
