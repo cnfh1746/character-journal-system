@@ -130,7 +130,15 @@ function detectCharacters() {
         }
         
         // 获取消息发送者名字
-        const name = msg.is_user ? userName : msg.name;
+        let name = msg.is_user ? userName : msg.name;
+        
+        // 提取【】中的名字（如【折枝】→折枝）
+        if (name && name.includes('【') && name.includes('】')) {
+            const match = name.match(/【([^】]+)】/);
+            if (match) {
+                name = match[1];
+            }
+        }
         
         // 排除：没有名字的消息 和 角色卡本身
         if (!name || name === mainCharName) {
