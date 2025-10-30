@@ -121,12 +121,19 @@ function detectCharacters() {
     
     const characterMap = new Map();
     const userName = context.name1 || '用户';
-    const mainCharName = context.name2 || '角色';
+    const mainCharName = context.name2 || '角色';  // 角色卡名字，需要排除
     
     chat.forEach(msg => {
-        const name = msg.is_user ? userName : (msg.name || mainCharName);
+        // 跳过用户消息
+        if (msg.is_user && settings.excludeUser) {
+            return;
+        }
         
-        if (settings.excludeUser && msg.is_user) {
+        // 获取消息发送者名字
+        const name = msg.is_user ? userName : msg.name;
+        
+        // 排除：没有名字的消息 和 角色卡本身
+        if (!name || name === mainCharName) {
             return;
         }
         
