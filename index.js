@@ -137,33 +137,37 @@ function detectCharacters() {
     chat.forEach(msg => {
         const content = msg.mes || '';
         
-        // 从消息内容中提取角色名（匹配常见格式）
-        // 格式1: "角色名: 对话内容"  或  "角色名：对话内容"
-        // 格式2: "「角色名」对话内容"
-        // 格式3: 段落开头的角色名
-        
-        const patterns = [
-            /^([^:：\n]+?)[:：]/gm,  // 匹配 "角色名:" 或 "角色名："
-            /「([^」]+)」/g,          // 匹配 「角色名」
-            /^　　([^，。！？\n]{2,6})/gm  // 匹配段落开头的2-6字角色名
-        ];
-        
+        // 从消息内容中提取角色名
+        // 只匹配 「角色名」 格式，这是最可靠的
+        const pattern = /「([^」]{2,8})」/g;
         const foundNames = new Set();
         
-        for (const pattern of patterns) {
-            const matches = content.matchAll(pattern);
-            for (const match of matches) {
-                if (match[1]) {
-                    let name = match[1].trim();
-                    
-                    // 排除过长或过短的匹配
-                    if (name.length < 2 || name.length > 10) continue;
-                    
-                    // 排除常见的非角色词
-                    if (['我', '你', '他', '她', '它', '说', '道', '问', '答', '想'].includes(name)) continue;
-                    
-                    foundNames.add(name);
-                }
+        const matches = content.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1]) {
+                let name = match[1].trim();
+                
+                // 排除过长或过短的匹配
+                if (name.length < 2 || name.length > 8) continue;
+                
+                // 排除包含标点符号的（不太可能是角色名）
+                if (/[。！？，、：；""''（）【】《》\s]/.test(name)) continue;
+                
+                // 排除纯数字
+                if (/^\d+$/.test(name)) continue;
+                
+                // 排除常见的非角色词
+                const excludeWords = [
+                    '我', '你', '他', '她', '它', '说', '道', '问', '答', '想',
+                    '回复', '第一章', '第二章', '章节', '时间', '地点', '其他',
+                    '当前', '下一', '风险', '规避', '幸好', '没错', '可以'
+                ];
+                if (excludeWords.includes(name)) continue;
+                
+                // 排除包含特殊字符的
+                if (/[*#\|📱🔔💬⭐]/.test(name)) continue;
+                
+                foundNames.add(name);
             }
         }
         
