@@ -135,32 +135,52 @@ function detectCharacters() {
     console.log('[角色日志] 角色卡名:', mainCharName);
     
     chat.forEach(msg => {
-        // 获取消息发送者名字
-        let name = msg.is_user ? userName : (msg.ch_name || msg.name || mainCharName);
+        const content = msg.mes || '';
         
-        if (!name) return;
+        // 从消息内容中提取角色名（匹配常见格式）
+        // 格式1: "角色名: 对话内容"  或  "角色名：对话内容"
+        // 格式2: "「角色名」对话内容"
+        // 格式3: 段落开头的角色名
         
-        // 提取【】中的名字（如【折枝】→折枝）
-        if (name.includes('【') && name.includes('】')) {
-            const match = name.match(/【([^】]+)】/);
-            if (match) {
-                name = match[1];
+        const patterns = [
+            /^([^:：\n]+?)[:：]/m,  // 匹配 "角色名:" 或 "角色名："
+            /「([^」]+)」/g,          // 匹配 「角色名」
+            /^　　([^，。！？\n]{2,6})/m  // 匹配段落开头的2-6字角色名
+        ];
+        
+        const foundNames = new Set();
+        
+        for (const pattern of patterns) {
+            const matches = content.matchAll(pattern);
+            for (const match of matches) {
+                if (match[1]) {
+                    let name = match[1].trim();
+                    
+                    // 排除过长或过短的匹配
+                    if (name.length < 2 || name.length > 10) continue;
+                    
+                    // 排除常见的非角色词
+                    if (['我', '你', '他', '她', '它', '说', '道', '问', '答', '想'].includes(name)) continue;
+                    
+                    foundNames.add(name);
+                }
             }
         }
         
-        // 检查是否在排除列表中
-        if (excludeList.includes(name)) {
-            return;
-        }
-        
-        if (characterMap.has(name)) {
-            characterMap.get(name).count++;
-        } else {
-            characterMap.set(name, {
-                name: name,
-                count: 1,
-                isUser: msg.is_user
-            });
+        // 添加检测到的角色
+        for (const name of foundNames) {
+            // 检查是否在排除列表中
+            if (excludeList.includes(name)) continue;
+            
+            if (characterMap.has(name)) {
+                characterMap.get(name).count++;
+            } else {
+                characterMap.set(name, {
+                    name: name,
+                    count: 1,
+                    isUser: false
+                });
+            }
         }
     });
     
