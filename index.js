@@ -84,11 +84,18 @@ async function getTargetLorebookName() {
     const context = getContext();
     
     if (settings.target === "character_main") {
-        const worldbook = characters[context.characterId]?.data?.extensions?.world;
-        if (!worldbook) {
-            throw new Error("当前角色未绑定主世界书");
+        // 获取当前聊天的世界书
+        const chatMetadata = context.chat_metadata || {};
+        const chatWorldbook = chatMetadata.world_info;
+        
+        if (chatWorldbook) {
+            return chatWorldbook;
         }
-        return worldbook;
+        
+        // 如果没有聊天世界书，创建一个新的
+        const chatId = context.chatId || "chat";
+        const charName = context.name2 || "character";
+        return `${charName}-Journal-${chatId}`;
     } else {
         const chatId = context.chatId || "unknown";
         return `CharacterJournal-${chatId}`;
@@ -780,6 +787,50 @@ async function fetchModels() {
     }
 }
 
+// 清空所有日志条目
+async function clearAllJournals() {
+    if (!confirm('确定要清空所有角色日志条目吗？此操作不可恢复！')) {
+        return;
+    }
+    
+    try {
+        const lorebookName = await getTargetLorebookName();
+        const bookData = await loadWorldInfo(lorebookName);
+        
+        if (!bookData || !bookData.entries) {
+            toastr.info('没有找到日志条目', '角色日志');
+            return;
+        }
+        
+        // 找出所有日志条目
+        let deletedCount = 0;
+        const entriesToDelete = [];
+        
+        for (const [key, entry] of Object.entries(bookData.entries)) {
+            if (entry.comment && entry.comment.startsWith(JOURNAL_COMMENT_PREFIX)) {
+                entriesToDelete.push(key);
+            }
+        }
+        
+        // 删除条目
+        for (const key of entriesToDelete) {
+            delete bookData.entries[key];
+            deletedCount++;
+        }
+        
+        if (deletedCount > 0) {
+            await saveWorldInfo(lorebookName, bookData, true);
+            toastr.success(`已清空 ${deletedCount} 个日志条目`, '角色日志');
+            await updateStatus();
+        } else {
+            toastr.info('没有找到日志条目', '角色日志');
+        }
+    } catch (error) {
+        console.error('[角色日志] 清空日志失败:', error);
+        toastr.error(`清空失败: ${error.message}`, '角色日志');
+    }
+}
+
 // 设置UI事件监听
 function setupUIHandlers() {
     // 保存设置按钮
@@ -797,6 +848,11 @@ function setupUIHandlers() {
     // 手动更新按钮
     $('#cj_manual_update').on('click', async function() {
         await executeJournalUpdate();
+    });
+    
+    // 清空日志按钮
+    $('#cj_clear_all').on('click', async function() {
+        await clearAllJournals();
     });
     
     // 检测模式改变时更新显示
