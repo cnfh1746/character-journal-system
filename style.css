@@ -28,7 +28,8 @@
     display: block;
     margin-bottom: 5px;
     font-weight: bold;
-    color: #ddd;
+    color: #ffffff;
+    font-size: 14px;
 }
 
 .character-journal-field input[type="text"],
@@ -57,7 +58,7 @@
     display: block;
     margin-top: 5px;
     font-size: 12px;
-    color: #999;
+    color: #ccc;
 }
 
 .character-journal-field input[type="checkbox"] {
@@ -71,8 +72,9 @@
     border-left: 3px solid #4a90e2;
     border-radius: 4px;
     margin-bottom: 15px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.6;
+    color: #ffffff;
 }
 
 .character-journal-warning {
@@ -142,9 +144,9 @@
     background-color: rgba(0, 0, 0, 0.2);
     border-radius: 5px;
     font-family: 'Courier New', monospace;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.8;
-    color: #ddd;
+    color: #ffffff;
 }
 
 .character-list-item {
@@ -312,6 +314,6 @@
 
 .journal-progress-text {
     font-size: 12px;
-    color: #999;
+    color: #ccc;
     white-space: nowrap;
 }
