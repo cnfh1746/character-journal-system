@@ -173,6 +173,7 @@ function detectCharacters() {
 // 获取要跟踪的角色列表
 function getTrackedCharacters() {
     const settings = extension_settings[extensionName];
+    const context = getContext();
     
     if (settings.detectionMode === "manual" && settings.manualCharacters) {
         return settings.manualCharacters
@@ -185,16 +186,30 @@ function getTrackedCharacters() {
             .filter(c => c.name);
     }
     
-    // 自动检测模式，应用排除用户设置
+    // 自动检测模式
     const allCharacters = detectCharacters();
+    const userName = context.name1 || '用户';
+    const mainCharName = context.name2 || '角色';
     
-    if (settings.excludeUser) {
-        const context = getContext();
-        const userName = context.name1 || '用户';
-        return allCharacters.filter(c => c.name !== userName && !c.isUser);
-    }
+    // 过滤：排除用户 + 排除角色卡名字
+    const filtered = allCharacters.filter(c => {
+        // 总是排除角色卡名字
+        if (c.name === mainCharName) {
+            return false;
+        }
+        
+        // 如果勾选了"排除用户"，才排除用户
+        if (settings.excludeUser && (c.name === userName || c.isUser)) {
+            return false;
+        }
+        
+        return true;
+    });
     
-    return allCharacters;
+    console.log('[角色日志] 过滤前:', allCharacters.map(c => c.name));
+    console.log('[角色日志] 过滤后:', filtered.map(c => c.name));
+    
+    return filtered;
 }
 
 // 读取角色日志进度
