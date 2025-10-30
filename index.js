@@ -136,7 +136,7 @@ function detectCharacters() {
     
     chat.forEach(msg => {
         // 获取消息发送者名字
-        let name = msg.is_user ? userName : (msg.name || mainCharName);
+        let name = msg.is_user ? userName : (msg.ch_name || msg.name || mainCharName);
         
         if (!name) return;
         
