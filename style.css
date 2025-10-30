@@ -1,0 +1,317 @@
+/* Character Journal System - Styles */
+
+.character-journal-settings {
+    padding: 10px;
+}
+
+.character-journal-section {
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    border-left: 3px solid #4a90e2;
+}
+
+.character-journal-section h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #4a90e2;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.character-journal-field {
+    margin-bottom: 15px;
+}
+
+.character-journal-field label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #ddd;
+}
+
+.character-journal-field input[type="text"],
+.character-journal-field input[type="number"],
+.character-journal-field input[type="password"],
+.character-journal-field select,
+.character-journal-field textarea {
+    width: 100%;
+    padding: 8px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: #fff;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.character-journal-field textarea {
+    min-height: 150px;
+    resize: vertical;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.character-journal-field small {
+    display: block;
+    margin-top: 5px;
+    font-size: 12px;
+    color: #999;
+}
+
+.character-journal-field input[type="checkbox"] {
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+.character-journal-info {
+    padding: 12px;
+    background-color: rgba(74, 144, 226, 0.1);
+    border-left: 3px solid #4a90e2;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.character-journal-warning {
+    padding: 12px;
+    background-color: rgba(231, 76, 60, 0.1);
+    border-left: 3px solid #e74c3c;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.character-journal-button-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 15px;
+}
+
+.character-journal-btn {
+    padding: 10px 20px;
+    background-color: #4a90e2;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    transition: background-color 0.3s, transform 0.1s;
+}
+
+.character-journal-btn:hover {
+    background-color: #357abd;
+    transform: translateY(-2px);
+}
+
+.character-journal-btn:active {
+    transform: translateY(0);
+}
+
+.character-journal-btn.success {
+    background-color: #27ae60;
+}
+
+.character-journal-btn.success:hover {
+    background-color: #229954;
+}
+
+.character-journal-btn.warning {
+    background-color: #f39c12;
+}
+
+.character-journal-btn.warning:hover {
+    background-color: #e67e22;
+}
+
+.character-journal-btn.danger {
+    background-color: #e74c3c;
+}
+
+.character-journal-btn.danger:hover {
+    background-color: #c0392b;
+}
+
+.character-journal-status {
+    padding: 15px;
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 5px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    color: #ddd;
+}
+
+.character-list-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 5px;
+    margin-bottom: 8px;
+}
+
+.character-list-item input[type="text"] {
+    flex: 1;
+    padding: 6px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: #fff;
+}
+
+.character-list-item button {
+    padding: 6px 12px;
+    background-color: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.character-list-item button:hover {
+    background-color: #c0392b;
+}
+
+/* Modal styles */
+.character-journal-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.character-journal-modal-content {
+    background-color: #2b2b2b;
+    border-radius: 10px;
+    max-width: 800px;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    animation: slideIn 0.3s;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.character-journal-modal-header {
+    padding: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.character-journal-modal-header h2 {
+    margin: 0;
+    color: #4a90e2;
+    font-size: 20px;
+}
+
+.character-journal-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.character-journal-modal-body textarea {
+    width: 100%;
+    min-height: 300px;
+    padding: 15px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+    color: #fff;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.character-journal-modal-footer {
+    padding: 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+/* Character badge */
+.character-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    background-color: #4a90e2;
+    color: white;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-right: 5px;
+    margin-bottom: 5px;
+}
+
+.character-badge.detected {
+    background-color: #27ae60;
+}
+
+.character-badge.tracked {
+    background-color: #f39c12;
+}
+
+/* Progress indicator */
+.journal-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.journal-progress-bar {
+    flex: 1;
+    height: 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.journal-progress-fill {
+    height: 100%;
+    background-color: #27ae60;
+    transition: width 0.3s;
+}
+
+.journal-progress-text {
+    font-size: 12px;
+    color: #999;
+    white-space: nowrap;
+}
