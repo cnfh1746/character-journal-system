@@ -159,9 +159,9 @@ function detectCharacters() {
         }
     });
     
-    // 过滤掉出场次数太少的（<3次）
+    // 过滤掉出场次数太少的（至少1次）
     const filteredCharacters = Array.from(characterMap.values())
-        .filter(c => c.count >= 3);
+        .filter(c => c.count >= 1);
     
     return filteredCharacters;
 }
