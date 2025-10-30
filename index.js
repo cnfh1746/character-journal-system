@@ -15,7 +15,7 @@ const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
 // 常量定义
 const JOURNAL_COMMENT_PREFIX = "【Character Journal】";
 const ARCHIVE_COMMENT_PREFIX = "【Character Archive】";
-const PROGRESS_SEAL_REGEX = /【Journal updated through floor (\d+)】$/;
+const PROGRESS_SEAL_REGEX = /【已更新至第 (\d+) 楼】$/;
 
 // 默认设置
 const defaultSettings = {
@@ -27,22 +27,28 @@ const defaultSettings = {
     
     updateThreshold: 20,
     entryLength: "short",
-    journalPrompt: `你是记忆记录助手。请为每个角色写一段第一人称日志，记录他们的经历、想法和感受。
+    journalPrompt: `你是记忆记录助手。请为每个角色写多条第一人称日志条目，每条记录一个独立的事件。
 
 要求：
 1. 使用第一人称（我、我的）
-2. 捕捉角色的思想、感受和观察
-3. 根据长度设置控制字数（极简50字以内，简短50-100字，适中100-200字，详细200-300字）
-4. 如果角色未出场，写：【本轮未出场】
+2. 每个事件独立成条，包含：日期/时间 + 事件 + 感受/想法
+3. 每条日志{LENGTH_CONSTRAINT}
+4. 一个角色可以有多条日志（取决于发生了多少事件）
+5. 如果角色未出场，写：【本轮未出场】
 
 输出格式：
-===角色:Alice===
-[Alice的第一人称日志]
-===角色:Bob===
-[Bob的第一人称日志]
+===角色:炽霞===
+• 早上在巡逻时遇到了杨，昨晚的事让我有些不知所措，但还是强装镇定。走路时身体还有些不适，希望他没注意到。
+• 巡逻中听到呼救声，立刻切换到工作模式。杨跟了上来，虽然有些意外，但多个人手总是好的。
+===角色:小系统===
+• 一早就开始调侃宿主昨晚的"战绩"，看他窘迫的样子真有趣。
+• 检测到附近有异常能量波动，提醒宿主注意，可能有麻烦要来了。
 ===END===
 
-注意：请严格按照指定的角色列表生成日志，不要为列表外的角色生成内容。`,
+注意：
+1. 严格按照指定的角色列表生成日志
+2. 不要为列表外的角色生成内容
+3. 不要生成世界名、地点名、系统提示等非角色内容`,
     
     autoRefine: false,
     refineThreshold: 5000,
@@ -307,10 +313,22 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     
     const characterList = characters.map(c => c.name).join(', ');
     
+    // 根据长度设置动态生成字数约束
+    const lengthConstraints = {
+        'very_short': '50字以内',
+        'short': '50-100字',
+        'medium': '100-200字',
+        'long': '200-300字'
+    };
+    const lengthConstraint = lengthConstraints[settings.entryLength] || '50-100字';
+    
+    // 替换提示词中的长度约束占位符
+    const promptWithLength = settings.journalPrompt.replace(/{LENGTH_CONSTRAINT}/g, lengthConstraint);
+    
     const aiMessages = [
         { 
             role: 'system', 
-            content: settings.journalPrompt 
+            content: promptWithLength 
         },
         { 
             role: 'user', 
@@ -363,7 +381,7 @@ async function updateCharacterJournal(characterName, journalContent, startFloor,
             e => e.comment === journalComment && !e.disable
         );
         
-        const newSeal = `【Journal updated through floor ${endFloor}】`;
+        const newSeal = `【已更新至第 ${endFloor} 楼】`;
         const newEntry = `\n\n---\n\n【第${startFloor}-${endFloor}楼】\n${journalContent}\n\n${newSeal}`;
         
         if (journalEntry) {
