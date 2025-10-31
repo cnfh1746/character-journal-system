@@ -362,6 +362,66 @@ function parseCharacterJournals(response) {
     return journals;
 }
 
+// AI识别角色
+async function detectCharactersByAI(messages) {
+    const context = getContext();
+    const settings = extension_settings[extensionName];
+    const userName = context.name1 || '用户';
+    const mainCharName = context.name2 || '角色';
+    
+    const formattedHistory = messages
+        .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
+        .join('\n');
+    
+    // 获取排除列表
+    const excludeList = [mainCharName]; // 总是排除角色卡名字
+    if (settings.excludeUser) {
+        excludeList.push(userName);
+    }
+    if (settings.excludeNames) {
+        excludeList.push(...settings.excludeNames.split(',').map(n => n.trim()).filter(Boolean));
+    }
+    
+    const detectPrompt = `你是角色识别助手。请分析以下小说式剧情文本，识别出所有出场的角色名字。
+
+要求：
+1. 只返回角色的名字，用逗号分隔
+2. 不要包含这些名字：${excludeList.join('、')}
+3. 不要包含地点、物品、组织等非角色名
+4. 如果没有识别到角色，返回：无
+
+文本内容：
+${formattedHistory}
+
+请直接输出角色名列表（格式：角色1, 角色2, 角色3）：`;
+    
+    const aiMessages = [
+        { role: 'user', content: detectPrompt }
+    ];
+    
+    console.log('[角色日志] 让AI识别角色...');
+    const response = await callAI(aiMessages);
+    
+    if (!response) {
+        return [];
+    }
+    
+    // 解析AI返回的角色列表
+    const detectedNames = response
+        .replace(/^.*?[:：]\s*/, '') // 移除可能的前缀
+        .split(/[,，、]/)
+        .map(name => name.trim())
+        .filter(name => name && name !== '无' && !excludeList.includes(name));
+    
+    console.log('[角色日志] AI识别到的角色:', detectedNames);
+    
+    return detectedNames.map(name => ({
+        name: name,
+        count: 0,
+        isUser: false
+    }));
+}
+
 // 生成角色日志
 async function generateCharacterJournals(startFloor, endFloor, characters) {
     const settings = extension_settings[extensionName];
@@ -376,7 +436,16 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
         .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
         .join('\n');
     
-    const characterList = characters.map(c => c.name).join(', ');
+    // 直接使用AI识别角色
+    toastr.info('AI正在识别角色...', '角色日志');
+    const finalCharacters = await detectCharactersByAI(messages);
+    
+    if (!finalCharacters || finalCharacters.length === 0) {
+        toastr.warning('AI未能识别到角色', '角色日志');
+        return null;
+    }
+    
+    const characterList = finalCharacters.map(c => c.name).join(', ');
     
     // 根据长度设置动态生成字数约束
     const lengthConstraints = {
