@@ -26,6 +26,7 @@ const defaultSettings = {
     excludeNames: "",
     excludeUser: true,
     autoUpdate: false,
+    useWorldInfo: true,
     
     updateThreshold: 20,
     journalPrompt: `你是记忆记录助手。请为每个角色写**多条**第一人称日志条目，每条记录一个独立的事件。
@@ -441,25 +442,33 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     
     const characterList = finalCharacters.map(c => c.name).join(', ');
     
-    // 获取每个角色的世界书信息
-    toastr.info('正在获取角色资料...', '角色日志');
-    const characterInfoMap = new Map();
-    for (const char of finalCharacters) {
-        const info = await getCharacterWorldInfo(char.name);
-        if (info) {
-            characterInfoMap.set(char.name, info);
-            console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 200) + '...');
-        }
-    }
-    
     // 构建包含角色资料的提示
     let characterInfoSection = '';
-    if (characterInfoMap.size > 0) {
-        characterInfoSection = '\n\n===角色资料===\n';
-        for (const [name, info] of characterInfoMap.entries()) {
-            characterInfoSection += `\n【${name}】\n${info}\n`;
+    
+    // 根据设置决定是否读取世界书
+    if (settings.useWorldInfo) {
+        toastr.info('正在获取角色资料...', '角色日志');
+        const characterInfoMap = new Map();
+        
+        for (const char of finalCharacters) {
+            const info = await getCharacterWorldInfo(char.name);
+            if (info) {
+                characterInfoMap.set(char.name, info);
+                console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 200) + '...');
+            }
         }
-        characterInfoSection += '===资料结束===\n';
+        
+        if (characterInfoMap.size > 0) {
+            characterInfoSection = '\n\n===角色资料===\n';
+            for (const [name, info] of characterInfoMap.entries()) {
+                characterInfoSection += `\n【${name}】\n${info}\n`;
+            }
+            characterInfoSection += '===资料结束===\n';
+        }
+        
+        console.log('[角色日志] 包含角色资料数:', characterInfoMap.size);
+    } else {
+        console.log('[角色日志] 已禁用世界书读取，跳过角色资料获取');
     }
     
     const aiMessages = [
@@ -474,7 +483,6 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     ];
     
     console.log('[角色日志] 发送给AI的角色列表:', characterList);
-    console.log('[角色日志] 包含角色资料数:', characterInfoMap.size);
     console.log('[角色日志] 对话记录长度:', formattedHistory.length);
     
     toastr.info('正在生成角色日志...', '角色日志');
@@ -773,6 +781,7 @@ function loadSettings() {
     $('#cj_manual_characters').val(settings.manualCharacters);
     $('#cj_exclude_names').val(settings.excludeNames || '');
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
+    $('#cj_use_worldinfo').prop('checked', settings.useWorldInfo);
     
     $('#cj_update_threshold').val(settings.updateThreshold);
     $('#cj_journal_prompt').val(settings.journalPrompt);
@@ -805,6 +814,7 @@ function saveSettings() {
     settings.manualCharacters = $('#cj_manual_characters').val();
     settings.excludeNames = $('#cj_exclude_names').val();
     settings.excludeUser = $('#cj_exclude_user').prop('checked');
+    settings.useWorldInfo = $('#cj_use_worldinfo').prop('checked');
     
     settings.updateThreshold = parseInt($('#cj_update_threshold').val());
     settings.journalPrompt = $('#cj_journal_prompt').val();
