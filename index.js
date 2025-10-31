@@ -112,130 +112,6 @@ async function getTargetLorebookName() {
     }
 }
 
-// 角色检测模块
-function detectCharacters() {
-    const context = getContext();
-    const settings = extension_settings[extensionName];
-    const chat = context.chat;
-    
-    if (!chat || chat.length === 0) return [];
-    
-    const characterMap = new Map();
-    const userName = context.name1 || '用户';
-    const mainCharName = context.name2 || '角色';
-    
-    // 获取排除列表
-    const excludeList = (settings.excludeNames || '')
-        .split(',')
-        .map(n => n.trim())
-        .filter(Boolean);
-    
-    console.log('[角色日志] 排除列表:', excludeList);
-    console.log('[角色日志] 用户名:', userName);
-    console.log('[角色日志] 角色卡名:', mainCharName);
-    
-    chat.forEach(msg => {
-        const content = msg.mes || '';
-        
-        // 从消息内容中提取角色名
-        // 只匹配 「角色名」 格式，这是最可靠的
-        const pattern = /「([^」]{2,8})」/g;
-        const foundNames = new Set();
-        
-        const matches = content.matchAll(pattern);
-        for (const match of matches) {
-            if (match[1]) {
-                let name = match[1].trim();
-                
-                // 排除过长或过短的匹配
-                if (name.length < 2 || name.length > 8) continue;
-                
-                // 排除包含标点符号的（不太可能是角色名）
-                if (/[。！？，、：；""''（）【】《》\s]/.test(name)) continue;
-                
-                // 排除纯数字
-                if (/^\d+$/.test(name)) continue;
-                
-                // 排除常见的非角色词
-                const excludeWords = [
-                    '我', '你', '他', '她', '它', '说', '道', '问', '答', '想',
-                    '回复', '第一章', '第二章', '章节', '时间', '地点', '其他',
-                    '当前', '下一', '风险', '规避', '幸好', '没错', '可以'
-                ];
-                if (excludeWords.includes(name)) continue;
-                
-                // 排除包含特殊字符的
-                if (/[*#\|📱🔔💬⭐]/.test(name)) continue;
-                
-                foundNames.add(name);
-            }
-        }
-        
-        // 添加检测到的角色
-        for (const name of foundNames) {
-            // 检查是否在排除列表中
-            if (excludeList.includes(name)) continue;
-            
-            if (characterMap.has(name)) {
-                characterMap.get(name).count++;
-            } else {
-                characterMap.set(name, {
-                    name: name,
-                    count: 1,
-                    isUser: false
-                });
-            }
-        }
-    });
-    
-    const detected = Array.from(characterMap.values());
-    console.log('[角色日志] 检测到的角色:', detected.map(c => `${c.name}(${c.count})`));
-    
-    return detected;
-}
-
-// 获取要跟踪的角色列表
-function getTrackedCharacters() {
-    const settings = extension_settings[extensionName];
-    const context = getContext();
-    
-    if (settings.detectionMode === "manual" && settings.manualCharacters) {
-        return settings.manualCharacters
-            .split(',')
-            .map(name => ({
-                name: name.trim(),
-                count: 0,
-                isUser: false
-            }))
-            .filter(c => c.name);
-    }
-    
-    // 自动检测模式
-    const allCharacters = detectCharacters();
-    const userName = context.name1 || '用户';
-    const mainCharName = context.name2 || '角色';
-    
-    // 过滤：排除用户 + 排除角色卡名字
-    const filtered = allCharacters.filter(c => {
-        // 总是排除角色卡名字
-        if (c.name === mainCharName) {
-            return false;
-        }
-        
-        // 如果勾选了"排除用户"，才排除用户
-        if (settings.excludeUser && (c.name === userName || c.isUser)) {
-            return false;
-        }
-        
-        return true;
-    });
-    
-    console.log('[角色日志] 过滤前:', allCharacters.map(c => c.name));
-    console.log('[角色日志] 过滤后:', filtered.map(c => c.name));
-    
-    return filtered;
-}
-
 // 读取角色日志进度
 async function readJournalProgress(lorebookName, characterName) {
     try {
@@ -598,21 +474,30 @@ async function executeJournalUpdate() {
     
     try {
         const lorebookName = await getTargetLorebookName();
-        const characters = getTrackedCharacters();
         
-        if (characters.length === 0) {
-            toastr.warning('没有检测到角色', '角色日志');
-            return false;
-        }
-        
-        // 找出最小的已记录进度
-        let minProgress = Infinity;
-        for (const char of characters) {
-            const progress = await readJournalProgress(lorebookName, char.name);
-            minProgress = Math.min(minProgress, progress);
-        }
-        
-        if (minProgress === Infinity) {
+        // 读取所有已存在的日志进度，找出最小值
+        let minProgress = 0;
+        try {
+            const bookData = await loadWorldInfo(lorebookName);
+            if (bookData && bookData.entries) {
+                const journalEntries = Object.values(bookData.entries).filter(
+                    e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
+                );
+                
+                if (journalEntries.length > 0) {
+                    minProgress = Infinity;
+                    for (const entry of journalEntries) {
+                        const match = entry.content.match(PROGRESS_SEAL_REGEX);
+                        const progress = match ? parseInt(match[1], 10) : 0;
+                        minProgress = Math.min(minProgress, progress);
+                    }
+                    if (minProgress === Infinity) {
+                        minProgress = 0;
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('[角色日志] 无法读取现有进度，从头开始');
             minProgress = 0;
         }
         
@@ -626,8 +511,8 @@ async function executeJournalUpdate() {
         
         console.log(`[角色日志] 更新范围: ${startFloor}-${endFloor}楼`);
         
-        // 生成所有角色的日志
-        const journals = await generateCharacterJournals(startFloor, endFloor, characters);
+        // 生成所有角色的日志（AI会自动识别角色）
+        const journals = await generateCharacterJournals(startFloor, endFloor, null);
         
         if (!journals || journals.size === 0) {
             toastr.warning('未能生成任何日志', '角色日志');
@@ -665,40 +550,60 @@ async function updateStatus() {
     
     if (!context.chat) {
         $('#cj_status_display').html('未加载对话');
-        $('#detected_characters_display').html('<span style="color: #999;">未检测到角色</span>');
+        $('#detected_characters_display').html('<span style="color: #999;">AI将在更新时识别角色</span>');
         return;
     }
     
     try {
-        const characters = getTrackedCharacters();
+        const lorebookName = await getTargetLorebookName();
+        const totalMessages = context.chat.length;
+        
+        // 从世界书中读取已存在的角色日志
+        let trackedCharacters = [];
+        try {
+            const bookData = await loadWorldInfo(lorebookName);
+            if (bookData && bookData.entries) {
+                const journalEntries = Object.values(bookData.entries).filter(
+                    e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
+                );
+                
+                trackedCharacters = journalEntries.map(entry => {
+                    const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
+                    return { name: charName };
+                });
+            }
+        } catch (error) {
+            console.log('[角色日志] 无法读取世界书');
+        }
         
         // 更新检测到的角色显示
-        if (characters.length > 0) {
-            const charBadges = characters.map(c => 
-                `<span class="character-badge detected">${c.name} (${c.count}条)</span>`
+        if (trackedCharacters.length > 0) {
+            const charBadges = trackedCharacters.map(c => 
+                `<span class="character-badge detected">${c.name}</span>`
             ).join('');
             $('#detected_characters_display').html(charBadges);
         } else {
-            $('#detected_characters_display').html('<span style="color: #999;">未检测到角色</span>');
+            $('#detected_characters_display').html('<span style="color: #999;">AI将在更新时识别角色</span>');
         }
-        
-        const lorebookName = await getTargetLorebookName();
-        const totalMessages = context.chat.length;
         
         let statusHtml = `
             <strong>当前状态：</strong><br>
             • 功能状态: ${settings.enabled ? '✓ 已启用' : '✗ 未启用'}<br>
             • 世界书: ${lorebookName}<br>
             • 对话长度: ${totalMessages} 楼<br>
-            • 跟踪角色数: ${characters.length}<br>
+            • 跟踪角色数: ${trackedCharacters.length}<br>
             <br>
             <strong>📊 各角色进度：</strong><br>
         `;
         
-        for (const char of characters) {
-            const progress = await readJournalProgress(lorebookName, char.name);
-            const percentage = totalMessages > 0 ? Math.round((progress / totalMessages) * 100) : 0;
-            statusHtml += `• ${char.name}: ${progress}/${totalMessages} 楼 (${percentage}%)<br>`;
+        if (trackedCharacters.length > 0) {
+            for (const char of trackedCharacters) {
+                const progress = await readJournalProgress(lorebookName, char.name);
+                const percentage = totalMessages > 0 ? Math.round((progress / totalMessages) * 100) : 0;
+                statusHtml += `• ${char.name}: ${progress}/${totalMessages} 楼 (${percentage}%)<br>`;
+            }
+        } else {
+            statusHtml += `<span style="color: #999;">暂无角色日志，点击"手动更新"开始</span><br>`;
         }
         
         $('#cj_status_display').html(statusHtml);
