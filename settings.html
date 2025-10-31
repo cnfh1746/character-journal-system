@@ -19,9 +19,25 @@
             <label for="cj_target">世界书目标：</label>
             <select id="cj_target">
                 <option value="character_main">角色主世界书</option>
-                <option value="dedicated">专用世界书</option>
+                <option value="dedicated">专用世界书（自定义名称）</option>
+                <option value="existing">选择已存在的世界书</option>
             </select>
-            <small>选择将日志写入角色的主世界书还是创建专用世界书</small>
+            <small>选择将日志写入角色的主世界书、创建新的专用世界书或使用已有世界书</small>
+        </div>
+
+        <div class="character-journal-field" id="cj_dedicated_name_field" style="display: none;">
+            <label for="cj_dedicated_name">专用世界书名称：</label>
+            <input type="text" id="cj_dedicated_name" placeholder="例如: 角色日志-我的冒险">
+            <small>自定义世界书名称，留空则使用默认格式</small>
+        </div>
+
+        <div class="character-journal-field" id="cj_existing_worldbook_field" style="display: none;">
+            <label for="cj_existing_worldbook">选择世界书：</label>
+            <select id="cj_existing_worldbook">
+                <option value="">请选择...</option>
+            </select>
+            <button class="character-journal-btn" id="cj_refresh_worldbooks" style="margin-top: 5px;">🔄 刷新列表</button>
+            <small>从现有世界书中选择一个作为日志目标</small>
         </div>
 
         <div class="character-journal-field">

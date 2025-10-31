@@ -21,6 +21,8 @@ const PROGRESS_SEAL_REGEX = /【已更新至第 (\d+) 楼】$/;
 const defaultSettings = {
     enabled: false,
     target: "character_main",
+    dedicatedName: "",
+    existingWorldbook: "",
     detectionMode: "auto",
     manualCharacters: "",
     excludeNames: "",
@@ -108,9 +110,19 @@ async function getTargetLorebookName() {
         const chatId = context.chatId || "chat";
         const charName = context.name2 || "character";
         return `${charName}-Journal-${chatId}`;
-    } else {
+    } else if (settings.target === "dedicated") {
+        // 专用世界书：使用用户自定义名称或默认名称
+        if (settings.dedicatedName && settings.dedicatedName.trim()) {
+            return settings.dedicatedName.trim();
+        }
         const chatId = context.chatId || "unknown";
         return `CharacterJournal-${chatId}`;
+    } else if (settings.target === "existing") {
+        // 使用已存在的世界书
+        if (settings.existingWorldbook && settings.existingWorldbook.trim()) {
+            return settings.existingWorldbook.trim();
+        }
+        throw new Error("请先选择一个世界书");
     }
 }
 
@@ -1253,8 +1265,77 @@ async function clearAllJournals() {
     }
 }
 
+// 加载世界书列表
+async function loadWorldbooksList() {
+    try {
+        const worlds = window.world_names || [];
+        const select = $('#cj_existing_worldbook');
+        
+        select.empty();
+        select.append('<option value="">请选择...</option>');
+        
+        worlds.forEach(worldName => {
+            select.append(`<option value="${worldName}">${worldName}</option>`);
+        });
+        
+        // 恢复已保存的选择
+        const settings = extension_settings[extensionName];
+        if (settings.existingWorldbook) {
+            select.val(settings.existingWorldbook);
+        }
+        
+        console.log('[角色日志] 加载了', worlds.length, '个世界书');
+    } catch (error) {
+        console.error('[角色日志] 加载世界书列表失败:', error);
+    }
+}
+
 // 设置UI事件监听
 function setupUIHandlers() {
+    // 世界书目标改变时的处理
+    $('#cj_target').on('change', function() {
+        const target = $(this).val();
+        
+        // 显示/隐藏相应的输入框
+        if (target === 'dedicated') {
+            $('#cj_dedicated_name_field').show();
+            $('#cj_existing_worldbook_field').hide();
+        } else if (target === 'existing') {
+            $('#cj_dedicated_name_field').hide();
+            $('#cj_existing_worldbook_field').show();
+            loadWorldbooksList();
+        } else {
+            $('#cj_dedicated_name_field').hide();
+            $('#cj_existing_worldbook_field').hide();
+        }
+        
+        updateStatus();
+    });
+    
+    // 触发初始状态
+    $('#cj_target').trigger('change');
+    
+    // 专用世界书名称输入
+    $('#cj_dedicated_name').on('input', function() {
+        const settings = extension_settings[extensionName];
+        settings.dedicatedName = $(this).val();
+        saveSettingsDebounced();
+    });
+    
+    // 现有世界书选择
+    $('#cj_existing_worldbook').on('change', function() {
+        const settings = extension_settings[extensionName];
+        settings.existingWorldbook = $(this).val();
+        saveSettingsDebounced();
+        updateStatus();
+    });
+    
+    // 刷新世界书列表按钮
+    $('#cj_refresh_worldbooks').on('click', function() {
+        loadWorldbooksList();
+        toastr.success('世界书列表已刷新', '角色日志');
+    });
+    
     // 保存设置按钮
     $('#cj_save_settings').on('click', function() {
         saveSettings();
