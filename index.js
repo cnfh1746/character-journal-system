@@ -176,8 +176,18 @@ function getUnloggedMessages(startFloor, endFloor, characterName) {
     
     if (!chat || chat.length === 0) return [];
     
-    const historySlice = chat.slice(startFloor - 1, endFloor);
+    // 确保startFloor至少从第2楼开始，跳过第1楼（可能包含其他扩展的缓存数据）
+    const safeStartFloor = Math.max(startFloor, 2);
+    
+    if (safeStartFloor > endFloor) {
+        console.log('[角色日志] 跳过第1楼后没有可读取的消息');
+        return [];
+    }
+    
+    const historySlice = chat.slice(safeStartFloor - 1, endFloor);
     const userName = context.name1 || '用户';
+    
+    console.log(`[角色日志] 实际读取范围: 第${safeStartFloor}-${endFloor}楼 (已排除第1楼)`);
     
     return historySlice.map((msg, index) => {
         const author = msg.is_user ? userName : (msg.name || context.name2 || '角色');
@@ -185,7 +195,7 @@ function getUnloggedMessages(startFloor, endFloor, characterName) {
         const cleanedContent = extractContentTag(msg.mes);
         
         return {
-            floor: startFloor + index,
+            floor: safeStartFloor + index,
             author: author,
             content: cleanedContent,
             isTarget: author === characterName
@@ -225,9 +235,6 @@ async function callAI(messages) {
             };
             
             console.log('[角色日志] 请求体大小:', JSON.stringify(requestBody).length, '字符');
-            console.log('[角色日志] ========== 完整请求体 ==========');
-            console.log('[角色日志] 请求体内容:', JSON.stringify(requestBody, null, 2).substring(0, 10000));
-            console.log('[角色日志] ===================================');
             console.log('[角色日志] 发送API请求...');
             
             const response = await fetch(apiUrl, {
@@ -321,21 +328,6 @@ async function detectCharactersByAI(messages) {
         .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
         .join('\n');
     
-    // 调试：显示实际读取的楼层范围和内容片段
-    console.log('[角色日志] ============ 读取的对话范围 ============');
-    console.log('[角色日志] 开始楼层:', messages[0]?.floor || '无');
-    console.log('[角色日志] 结束楼层:', messages[messages.length - 1]?.floor || '无');
-    console.log('[角色日志] 总消息数:', messages.length);
-    console.log('[角色日志] ============ 前3条消息预览 ============');
-    messages.slice(0, 3).forEach((m, i) => {
-        console.log(`[角色日志] 第${m.floor}楼 - ${m.author}:`, m.content.substring(0, 100) + '...');
-    });
-    console.log('[角色日志] ============ 后3条消息预览 ============');
-    messages.slice(-3).forEach((m, i) => {
-        console.log(`[角色日志] 第${m.floor}楼 - ${m.author}:`, m.content.substring(0, 100) + '...');
-    });
-    console.log('[角色日志] ============================================');
-    
     // 获取排除列表
     const excludeList = [mainCharName]; // 总是排除角色卡名字
     if (settings.excludeUser) {
@@ -345,19 +337,18 @@ async function detectCharactersByAI(messages) {
         excludeList.push(...settings.excludeNames.split(',').map(n => n.trim()).filter(Boolean));
     }
     
-    const detectPrompt = `你是角色识别助手。请分析以下文本，识别出**实际出场并有对话或行动描写**的角色。
+    const detectPrompt = `你是角色识别助手。请分析以下小说式剧情文本，识别出所有出场的角色名字。
 
-重要规则：
-1. 只识别有直接对话或行动描写的角色
-2. 仅被提及但没出场的角色不算（例如"某某说过..."中提到的角色如果没有实际出场就不算）
-3. 不要包含这些名字：${excludeList.join('、')}
-4. 不要包含地点、物品、组织等非角色名
-5. 如果没有识别到符合条件的角色，返回：无
+要求：
+1. 只返回角色的名字，用逗号分隔
+2. 不要包含这些名字：${excludeList.join('、')}
+3. 不要包含地点、物品、组织等非角色名
+4. 如果没有识别到角色，返回：无
 
 文本内容：
 ${formattedHistory}
 
-请直接输出**真正出场的**角色名列表（格式：角色1, 角色2, 角色3）：`;
+请直接输出角色名列表（格式：角色1, 角色2, 角色3）：`;
     
     const aiMessages = [
         { role: 'user', content: detectPrompt }
