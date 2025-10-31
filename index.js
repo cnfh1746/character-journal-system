@@ -29,26 +29,27 @@ const defaultSettings = {
     useWorldInfo: true,
     
     updateThreshold: 20,
-    journalPrompt: `你是记忆记录助手。请为每个角色写**多条**第一人称日志条目，每条记录一个独立的事件。
+    journalPrompt: `你是记忆记录助手。请为**在本轮对话中出场的角色**写第一人称日志。
 
-要求：
-1. 使用第一人称（我、我的）
-2. 每个事件独立成条，格式：时间标记 + 事件 + 感受/想法
-3. 时间标记可以灵活使用：具体时间（早上/下午）、日期（某月某日）、节日（春节/中秋）、事件节点（XX事件前/中/后）等
-4. 每条日志控制在50-100字左右
-5. 一个角色可以有多条日志（取决于发生了多少事件）
-6. 如果角色未出场，写：【本轮未出场】
+重要规则：
+1. 只为实际出场并有对话/行动的角色写日志
+2. 未出场的角色不要输出任何内容（直接跳过）
+3. 使用第一人称（我、我的）
+4. 每个事件独立成条，格式：时间标记 + 事件 + 感受/想法
+5. 时间标记可灵活使用：具体时间（早上/下午）、日期、节日、事件节点等
+6. 每条日志控制在50-100字左右
 
 输出格式示例：
 ===角色:炽霞===
 • 早上巡逻时 - 遇到了杨，昨晚的事让我有些不知所措，但还是强装镇定。走路时身体还有些不适，希望他没注意到。
 • 巡逻途中 - 听到呼救声，立刻切换到工作模式。杨跟了上来，虽然有些意外，但多个人手总是好的。
-===角色:小系统===
-• 清晨时分 - 一早就开始调侃宿主昨晚的"战绩"，看他窘迫的样子真有趣。
-• 能量异常 - 检测到附近有异常能量波动，提醒宿主注意，可能有麻烦要来了。
+===角色:秧秧===
+• 上午 - 继续照顾杨和炽霞，看着两人的互动觉得有些好笑。年轻人的感情总是这么青涩可爱。
 ===END===
 
 禁止事项：
+❌ 不要为未出场的角色输出任何内容
+❌ 不要输出"未出场"、"无"等占位符
 ❌ 禁止生成男性的日志
 ❌ 不要为非角色实体生成日志（世界名、地点、组织等）`,
     
@@ -137,6 +138,37 @@ async function readJournalProgress(lorebookName, characterName) {
     }
 }
 
+// 提取content标签内的内容
+function extractContentTag(text) {
+    // 尝试提取 <content> 标签内容
+    const contentMatch = text.match(/<content>([\s\S]*?)<\/content>/);
+    if (contentMatch && contentMatch[1].trim()) {
+        return contentMatch[1].trim();
+    }
+    
+    // 如果没有content标签，返回原文本
+    // 但要移除其他标签（thinking, tableEdit, chat, details等）
+    let cleaned = text;
+    
+    // 移除thinking标签及内容
+    cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/g, '');
+    
+    // 移除tableEdit标签及内容
+    cleaned = cleaned.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/g, '');
+    
+    // 移除chat标签及内容
+    cleaned = cleaned.replace(/<chat>[\s\S]*?<\/chat>/g, '');
+    
+    // 移除details标签及内容（包括折叠的手机、状态等）
+    cleaned = cleaned.replace(/<details>[\s\S]*?<\/details>/g, '');
+    
+    // 移除其他常见标签
+    cleaned = cleaned.replace(/<Phone>[\s\S]*?<\/Phone>/g, '');
+    cleaned = cleaned.replace(/<StatusBlocks>[\s\S]*?<\/StatusBlocks>/g, '');
+    
+    return cleaned.trim();
+}
+
 // 获取未记录的消息
 function getUnloggedMessages(startFloor, endFloor, characterName) {
     const context = getContext();
@@ -149,10 +181,13 @@ function getUnloggedMessages(startFloor, endFloor, characterName) {
     
     return historySlice.map((msg, index) => {
         const author = msg.is_user ? userName : (msg.name || context.name2 || '角色');
+        // 提取content标签内容
+        const cleanedContent = extractContentTag(msg.mes);
+        
         return {
             floor: startFloor + index,
             author: author,
-            content: msg.mes.trim(),
+            content: cleanedContent,
             isTarget: author === characterName
         };
     }).filter(m => m.content);
