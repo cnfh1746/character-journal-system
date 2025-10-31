@@ -302,80 +302,56 @@ ${formattedHistory}
 async function getCharacterWorldInfo(characterName) {
     try {
         const context = getContext();
+        const chatMetadata = context.chat_metadata || {};
+        const worldbooks = [];
+        
+        // 获取当前聊天绑定的世界书
+        if (chatMetadata.world_info) {
+            worldbooks.push(chatMetadata.world_info);
+            console.log(`[角色日志] 添加聊天世界书: ${chatMetadata.world_info}`);
+        }
+        
+        // 获取角色卡绑定的世界书（使用正确的路径）
+        if (context.characterId !== undefined) {
+            const char = characters[context.characterId];
+            const worldbookName = char?.data?.extensions?.world;
+            if (worldbookName) {
+                worldbooks.push(worldbookName);
+                console.log(`[角色日志] 添加角色世界书: ${worldbookName}`);
+            }
+        }
+        
         let characterInfo = '';
         
-        // 方法1：尝试从全局world_info对象获取所有世界书
-        if (typeof world_info !== 'undefined' && world_info) {
-            console.log(`[角色日志] 尝试从全局world_info获取${characterName}的资料`);
-            
-            // world_info.globalSelect 包含所有激活的世界书
-            const activeBooks = world_info.globalSelect || [];
-            console.log(`[角色日志] 找到${activeBooks.length}个激活的世界书`);
-            
-            for (const bookName of activeBooks) {
-                try {
-                    const bookData = await loadWorldInfo(bookName);
-                    if (!bookData || !bookData.entries) continue;
-                    
-                    console.log(`[角色日志] 检查世界书: ${bookName}, 条目数: ${Object.keys(bookData.entries).length}`);
-                    
-                    // 查找包含该角色名的条目
-                    const relevantEntries = Object.values(bookData.entries).filter(entry => {
-                        if (entry.disable) return false;
-                        
-                        // 检查关键词是否包含角色名
-                        const allKeys = [...(entry.key || []), ...(entry.keysecondary || [])];
-                        const matched = allKeys.some(key => 
-                            key.toLowerCase().includes(characterName.toLowerCase()) ||
-                            characterName.toLowerCase().includes(key.toLowerCase())
-                        );
-                        
-                        if (matched) {
-                            console.log(`[角色日志] 匹配到条目，关键词: ${allKeys.join(', ')}`);
-                        }
-                        
-                        return matched;
-                    });
-                    
-                    // 提取相关信息
-                    for (const entry of relevantEntries) {
-                        if (entry.content && !entry.comment?.includes('Journal') && !entry.comment?.includes('Archive')) {
-                            characterInfo += `\n${entry.content}\n`;
-                        }
-                    }
-                } catch (error) {
-                    console.log(`[角色日志] 无法读取世界书 ${bookName}:`, error);
-                }
-            }
-        }
-        
-        // 方法2：从角色卡的character_book读取
-        if (context.characters && context.characters.length > 0) {
-            const currentChar = context.characters.find(c => c.avatar === context.characterId);
-            if (currentChar && currentChar.data && currentChar.data.character_book) {
-                console.log(`[角色日志] 找到角色卡内嵌世界书`);
-                const charBook = currentChar.data.character_book;
+        // 遍历所有世界书，查找与该角色相关的条目
+        for (const bookName of worldbooks) {
+            try {
+                const bookData = await loadWorldInfo(bookName);
+                if (!bookData || !bookData.entries) continue;
                 
-                if (charBook.entries) {
-                    const relevantEntries = Object.values(charBook.entries).filter(entry => {
-                        if (entry.disable) return false;
-                        const allKeys = [...(entry.keys || entry.key || []), ...(entry.keysecondary || [])];
-                        return allKeys.some(key => 
-                            key.toLowerCase().includes(characterName.toLowerCase()) ||
-                            characterName.toLowerCase().includes(key.toLowerCase())
-                        );
-                    });
+                // 查找包含该角色名的条目
+                const relevantEntries = Object.values(bookData.entries).filter(entry => {
+                    if (entry.disable) return false;
                     
-                    for (const entry of relevantEntries) {
-                        if (entry.content) {
-                            characterInfo += `\n${entry.content}\n`;
-                        }
+                    // 检查关键词是否包含角色名
+                    const allKeys = [...(entry.key || []), ...(entry.keysecondary || [])];
+                    return allKeys.some(key => 
+                        key.toLowerCase().includes(characterName.toLowerCase()) ||
+                        characterName.toLowerCase().includes(key.toLowerCase())
+                    );
+                });
+                
+                // 提取相关信息
+                for (const entry of relevantEntries) {
+                    if (entry.content && !entry.comment?.includes('Journal') && !entry.comment?.includes('Archive')) {
+                        characterInfo += `\n${entry.content}\n`;
                     }
                 }
+            } catch (error) {
+                console.log(`[角色日志] 无法读取世界书 ${bookName}`);
             }
         }
         
-        console.log(`[角色日志] ${characterName}的资料长度: ${characterInfo.length}`);
         return characterInfo.trim();
     } catch (error) {
         console.error('[角色日志] 获取角色信息失败:', error);
