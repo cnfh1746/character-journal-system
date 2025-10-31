@@ -161,6 +161,9 @@ function getUnloggedMessages(startFloor, endFloor, characterName) {
 async function callAI(messages) {
     const settings = extension_settings[extensionName];
     
+    console.log('[角色日志] callAI开始');
+    console.log('[角色日志] 是否使用自定义API:', !!settings.api.url);
+    
     // 如果有自定义API设置
     if (settings.api.url) {
         try {
@@ -174,28 +177,51 @@ async function callAI(messages) {
                 }
             }
             
+            console.log('[角色日志] 自定义API URL:', apiUrl);
+            console.log('[角色日志] 模型:', settings.api.model);
+            console.log('[角色日志] max_tokens:', settings.api.maxTokens);
+            
+            const requestBody = {
+                model: settings.api.model || 'gpt-3.5-turbo',
+                messages: messages,
+                temperature: 0.7,
+                max_tokens: parseInt(settings.api.maxTokens) || 2000
+            };
+            
+            console.log('[角色日志] 请求体大小:', JSON.stringify(requestBody).length, '字符');
+            console.log('[角色日志] 发送API请求...');
+            
             const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${settings.api.key || ''}`
                 },
-                body: JSON.stringify({
-                    model: settings.api.model || 'gpt-3.5-turbo',
-                    messages: messages,
-                    temperature: 0.7,
-                    max_tokens: parseInt(settings.api.maxTokens) || 2000
-                })
+                body: JSON.stringify(requestBody)
             });
             
+            console.log('[角色日志] API响应状态:', response.status);
+            
             if (!response.ok) {
-                throw new Error(`API请求失败: ${response.status}`);
+                const errorText = await response.text();
+                console.error('[角色日志] API错误响应:', errorText);
+                throw new Error(`API请求失败: ${response.status} - ${errorText.substring(0, 200)}`);
             }
             
             const data = await response.json();
-            return data.choices[0].message.content;
+            console.log('[角色日志] API返回数据结构:', Object.keys(data));
+            
+            if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+                console.error('[角色日志] API返回数据异常:', data);
+                throw new Error('API返回数据格式不正确');
+            }
+            
+            const content = data.choices[0].message.content;
+            console.log('[角色日志] 提取到内容长度:', content?.length || 0);
+            return content;
         } catch (error) {
             console.error('[角色日志] API调用失败:', error);
+            console.error('[角色日志] 错误堆栈:', error.stack);
             toastr.error(`API调用失败: ${error.message}`, '角色日志');
             return null;
         }
@@ -203,16 +229,23 @@ async function callAI(messages) {
     
     // 使用SillyTavern的默认API
     try {
+        console.log('[角色日志] 使用ST默认API');
         const generateRaw = window.generateRaw || window.Generate?.generateRaw;
         if (!generateRaw) {
             throw new Error('找不到SillyTavern的生成函数');
         }
         
         const prompt = messages.map(m => m.content).join('\n\n');
+        console.log('[角色日志] 合并后的提示词长度:', prompt.length);
+        console.log('[角色日志] 调用generateRaw...');
+        
         const result = await generateRaw(prompt, '', false, false);
+        
+        console.log('[角色日志] generateRaw返回结果长度:', result?.length || 0);
         return result;
     } catch (error) {
         console.error('[角色日志] 调用ST API失败:', error);
+        console.error('[角色日志] 错误堆栈:', error.stack);
         toastr.error(`生成日志失败: ${error.message}`, '角色日志');
         return null;
     }
@@ -408,27 +441,7 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     
     const characterList = finalCharacters.map(c => c.name).join(', ');
     
-    // 获取每个角色的世界书信息
-    toastr.info('正在获取角色资料...', '角色日志');
-    const characterInfoMap = new Map();
-    for (const char of finalCharacters) {
-        const info = await getCharacterWorldInfo(char.name);
-        if (info) {
-            characterInfoMap.set(char.name, info);
-            console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 200) + '...');
-        }
-    }
-    
-    // 构建包含角色资料的提示
-    let characterInfoSection = '';
-    if (characterInfoMap.size > 0) {
-        characterInfoSection = '\n\n===角色资料===\n';
-        for (const [name, info] of characterInfoMap.entries()) {
-            characterInfoSection += `\n【${name}】\n${info}\n`;
-        }
-        characterInfoSection += '===资料结束===\n';
-    }
-    
+    // 不预先读取世界书，只发送角色列表和对话记录
     const aiMessages = [
         { 
             role: 'system', 
@@ -436,27 +449,55 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
         },
         { 
             role: 'user', 
-            content: `要跟踪的角色: ${characterList}${characterInfoSection}\n对话记录:\n${formattedHistory}` 
+            content: `要跟踪的角色: ${characterList}\n\n对话记录:\n${formattedHistory}` 
         }
     ];
     
     console.log('[角色日志] 发送给AI的角色列表:', characterList);
-    console.log('[角色日志] 包含角色资料数:', characterInfoMap.size);
     console.log('[角色日志] 对话记录长度:', formattedHistory.length);
     
     toastr.info('正在生成角色日志...', '角色日志');
+    
+    console.log('[角色日志] 开始调用AI...');
+    console.log('[角色日志] 消息内容长度:', JSON.stringify(aiMessages).length, '字符');
+    
     const response = await callAI(aiMessages);
     
+    console.log('[角色日志] AI调用完成');
+    
     if (!response) {
+        console.error('[角色日志] AI返回空响应');
+        toastr.error('AI未返回任何内容', '角色日志');
         return null;
     }
     
-    console.log('[角色日志] AI响应:', response);
+    console.log('[角色日志] AI响应长度:', response.length, '字符');
+    console.log('[角色日志] AI响应内容:', response.substring(0, 500) + '...');
     
     const journals = parseCharacterJournals(response);
-    console.log('[角色日志] 解析结果:', Array.from(journals.keys()));
+    console.log('[角色日志] 解析到的角色:', Array.from(journals.keys()));
     
-    return journals;
+    // 现在为每个角色补充世界书信息（单独读取，不一次性读取所有）
+    toastr.info('正在为角色补充资料...', '角色日志');
+    const enrichedJournals = new Map();
+    
+    for (const [charName, journalContent] of journals.entries()) {
+        console.log(`[角色日志] 正在读取${charName}的世界书资料...`);
+        const charInfo = await getCharacterWorldInfo(charName);
+        
+        let enrichedContent = journalContent;
+        
+        // 如果有世界书信息，添加到日志前面作为背景
+        if (charInfo) {
+            console.log(`[角色日志] ${charName}的资料长度:`, charInfo.length);
+            enrichedContent = `【角色设定】\n${charInfo}\n\n---\n\n${journalContent}`;
+        }
+        
+        enrichedJournals.set(charName, enrichedContent);
+    }
+    
+    console.log('[角色日志] 资料补充完成');
+    return enrichedJournals;
 }
 
 // 更新角色日志条目
