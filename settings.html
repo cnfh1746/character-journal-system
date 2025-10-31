@@ -78,20 +78,7 @@
         </div>
 
         <div class="character-journal-field">
-            <label for="cj_entry_length">单次日志长度：</label>
-            <select id="cj_entry_length">
-                <option value="very_short">极简 (50字以内)</option>
-                <option value="short">简短 (50-100字)</option>
-                <option value="medium">适中 (100-200字)</option>
-                <option value="long">详细 (200-300字)</option>
-            </select>
-        </div>
-
-        <div class="character-journal-field">
             <label for="cj_journal_prompt">日志生成提示词：</label>
-            <small style="color: #666; display: block; margin-bottom: 8px;">
-                提示：使用 <code>{LENGTH_CONSTRAINT}</code> 占位符，系统会自动替换为上面选择的长度要求
-            </small>
             <textarea id="cj_journal_prompt" placeholder="输入生成日志的系统提示词...">你是记忆记录助手。请为每个角色写一段第一人称日志，记录他们的经历、想法和感受。
 
 要求：
