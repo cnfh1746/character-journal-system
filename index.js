@@ -225,6 +225,9 @@ async function callAI(messages) {
             };
             
             console.log('[角色日志] 请求体大小:', JSON.stringify(requestBody).length, '字符');
+            console.log('[角色日志] ========== 完整请求体 ==========');
+            console.log('[角色日志] 请求体内容:', JSON.stringify(requestBody, null, 2).substring(0, 10000));
+            console.log('[角色日志] ===================================');
             console.log('[角色日志] 发送API请求...');
             
             const response = await fetch(apiUrl, {
@@ -342,18 +345,19 @@ async function detectCharactersByAI(messages) {
         excludeList.push(...settings.excludeNames.split(',').map(n => n.trim()).filter(Boolean));
     }
     
-    const detectPrompt = `你是角色识别助手。请分析以下小说式剧情文本，识别出所有出场的角色名字。
+    const detectPrompt = `你是角色识别助手。请分析以下文本，识别出**实际出场并有对话或行动描写**的角色。
 
-要求：
-1. 只返回角色的名字，用逗号分隔
-2. 不要包含这些名字：${excludeList.join('、')}
-3. 不要包含地点、物品、组织等非角色名
-4. 如果没有识别到角色，返回：无
+重要规则：
+1. 只识别有直接对话或行动描写的角色
+2. 仅被提及但没出场的角色不算（例如"某某说过..."中提到的角色如果没有实际出场就不算）
+3. 不要包含这些名字：${excludeList.join('、')}
+4. 不要包含地点、物品、组织等非角色名
+5. 如果没有识别到符合条件的角色，返回：无
 
 文本内容：
 ${formattedHistory}
 
-请直接输出角色名列表（格式：角色1, 角色2, 角色3）：`;
+请直接输出**真正出场的**角色名列表（格式：角色1, 角色2, 角色3）：`;
     
     const aiMessages = [
         { role: 'user', content: detectPrompt }
