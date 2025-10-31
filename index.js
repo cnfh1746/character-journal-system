@@ -462,8 +462,11 @@ async function updateCharacterJournal(characterName, journalContent, startFloor,
         
         // 检查是否需要精炼
         if (settings.autoRefine && journalEntry.content.length >= settings.refineThreshold) {
-            console.log(`[角色日志] ${characterName}的日志达到精炼阈值`);
-            toastr.info(`${characterName}的日志已达阈值，建议执行精炼`, '角色日志');
+            console.log(`[角色日志] ${characterName}的日志达到精炼阈值，自动触发精炼`);
+            toastr.info(`${characterName}的日志达到阈值，正在自动精炼...`, '角色日志');
+            
+            // 自动执行精炼
+            await refineCharacterJournal(characterName, lorebookName);
         }
         
         return true;
@@ -866,6 +869,166 @@ async function fetchModels() {
     }
 }
 
+// 手动精炼所有日志
+async function refineAllJournals() {
+    if (!confirm('确定要精炼所有角色的日志吗？这会将旧日志归档并压缩。')) {
+        return;
+    }
+    
+    try {
+        const lorebookName = await getTargetLorebookName();
+        const bookData = await loadWorldInfo(lorebookName);
+        
+        if (!bookData || !bookData.entries) {
+            toastr.info('没有找到日志条目', '角色日志');
+            return;
+        }
+        
+        // 找出所有日志条目
+        const journalEntries = Object.values(bookData.entries).filter(
+            e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
+        );
+        
+        if (journalEntries.length === 0) {
+            toastr.info('没有找到需要精炼的日志', '角色日志');
+            return;
+        }
+        
+        toastr.info(`开始精炼 ${journalEntries.length} 个角色的日志...`, '角色日志');
+        
+        let successCount = 0;
+        for (const entry of journalEntries) {
+            const characterName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
+            const success = await refineCharacterJournal(characterName, lorebookName);
+            if (success) {
+                successCount++;
+            }
+        }
+        
+        if (successCount > 0) {
+            toastr.success(`成功精炼了 ${successCount} 个角色的日志`, '角色日志');
+            await updateStatus();
+        } else {
+            toastr.warning('没有角色日志需要精炼或所有精炼都失败了', '角色日志');
+        }
+    } catch (error) {
+        console.error('[角色日志] 批量精炼失败:', error);
+        toastr.error(`批量精炼失败: ${error.message}`, '角色日志');
+    }
+}
+
+// 精炼单个角色的日志
+async function refineCharacterJournal(characterName, lorebookName) {
+    const settings = extension_settings[extensionName];
+    
+    try {
+        const bookData = await loadWorldInfo(lorebookName);
+        if (!bookData || !bookData.entries) {
+            toastr.error('无法读取世界书', '角色日志');
+            return false;
+        }
+        
+        // 找到该角色的日志条目
+        const journalComment = `${JOURNAL_COMMENT_PREFIX}${characterName}`;
+        const journalEntry = Object.values(bookData.entries).find(
+            e => e.comment === journalComment && !e.disable
+        );
+        
+        if (!journalEntry) {
+            toastr.warning(`未找到${characterName}的日志条目`, '角色日志');
+            return false;
+        }
+        
+        // 提取所有日志段落（按分隔符拆分）
+        const content = journalEntry.content;
+        const sections = content.split(/---\n\n/).filter(s => s.trim());
+        
+        if (sections.length <= settings.keepRecent) {
+            toastr.info(`${characterName}的日志条目数不足，无需精炼`, '角色日志');
+            return false;
+        }
+        
+        // 保留最近的N条日志
+        const recentSections = sections.slice(-settings.keepRecent);
+        
+        // 需要归档的旧日志
+        const oldSections = sections.slice(0, -settings.keepRecent);
+        const oldContent = oldSections.join('\n---\n\n');
+        
+        // 调用AI精炼旧日志
+        const refineMessages = [
+            { role: 'system', content: settings.refinePrompt },
+            { role: 'user', content: `角色名: ${characterName}\n\n需要精炼的日志:\n${oldContent}` }
+        ];
+        
+        console.log(`[角色日志] 精炼${characterName}的旧日志，归档${oldSections.length}条，保留${recentSections.length}条`);
+        const refinedArchive = await callAI(refineMessages);
+        
+        if (!refinedArchive) {
+            toastr.error(`精炼${characterName}的日志失败`, '角色日志');
+            return false;
+        }
+        
+        // 创建归档条目
+        const archiveKey = Date.now().toString() + '-archive-' + characterName;
+        const archiveComment = `${ARCHIVE_COMMENT_PREFIX}${characterName}`;
+        
+        const archiveEntry = {
+            uid: archiveKey,
+            key: [`${characterName}档案`, `${characterName}过往`],
+            keysecondary: [],
+            comment: archiveComment,
+            content: `${characterName}的精炼档案（归档）:\n\n${refinedArchive}`,
+            constant: false,
+            selective: true,
+            selectiveLogic: 0,
+            addMemo: false,
+            order: parseInt(settings.entryOrder) - 10 || 80,
+            position: parseInt(settings.insertionPosition) || 2,
+            disable: false,
+            excludeRecursion: true,
+            preventRecursion: true,
+            delayUntilRecursion: false,
+            probability: 100,
+            useProbability: true,
+            depth: parseInt(settings.depth) || 4,
+            group: '',
+            groupOverride: false,
+            groupWeight: 100,
+            scanDepth: null,
+            caseSensitive: false,
+            matchWholeWords: false,
+            useGroupScoring: false,
+            automationId: '',
+            role: 0,
+            vectorized: false,
+            sticky: 0,
+            cooldown: 0,
+            delay: 0
+        };
+        
+        bookData.entries[archiveKey] = archiveEntry;
+        
+        // 更新原日志条目，只保留最近的条目
+        const headerMatch = content.match(/^(.+?的第一人称日志记录：)/);
+        const header = headerMatch ? headerMatch[1] : `${characterName}的第一人称日志记录：`;
+        
+        journalEntry.content = header + '\n\n' + recentSections.join('\n---\n\n');
+        
+        // 保存世界书
+        await saveWorldInfo(lorebookName, bookData, true);
+        
+        console.log(`[角色日志] ${characterName}的日志精炼完成`);
+        toastr.success(`${characterName}的日志已精炼，归档了${oldSections.length}条旧日志`, '角色日志');
+        
+        return true;
+    } catch (error) {
+        console.error(`[角色日志] 精炼${characterName}的日志失败:`, error);
+        toastr.error(`精炼失败: ${error.message}`, '角色日志');
+        return false;
+    }
+}
+
 // 清空所有日志条目
 async function clearAllJournals() {
     if (!confirm('确定要清空所有角色日志条目吗？此操作不可恢复！')) {
@@ -927,6 +1090,11 @@ function setupUIHandlers() {
     // 手动更新按钮
     $('#cj_manual_update').on('click', async function() {
         await executeJournalUpdate();
+    });
+    
+    // 手动精炼按钮
+    $('#cj_manual_refine').on('click', async function() {
+        await refineAllJournals();
     });
     
     // 清空日志按钮
