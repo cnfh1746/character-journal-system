@@ -318,6 +318,21 @@ async function detectCharactersByAI(messages) {
         .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
         .join('\n');
     
+    // 调试：显示实际读取的楼层范围和内容片段
+    console.log('[角色日志] ============ 读取的对话范围 ============');
+    console.log('[角色日志] 开始楼层:', messages[0]?.floor || '无');
+    console.log('[角色日志] 结束楼层:', messages[messages.length - 1]?.floor || '无');
+    console.log('[角色日志] 总消息数:', messages.length);
+    console.log('[角色日志] ============ 前3条消息预览 ============');
+    messages.slice(0, 3).forEach((m, i) => {
+        console.log(`[角色日志] 第${m.floor}楼 - ${m.author}:`, m.content.substring(0, 100) + '...');
+    });
+    console.log('[角色日志] ============ 后3条消息预览 ============');
+    messages.slice(-3).forEach((m, i) => {
+        console.log(`[角色日志] 第${m.floor}楼 - ${m.author}:`, m.content.substring(0, 100) + '...');
+    });
+    console.log('[角色日志] ============================================');
+    
     // 获取排除列表
     const excludeList = [mainCharName]; // 总是排除角色卡名字
     if (settings.excludeUser) {
