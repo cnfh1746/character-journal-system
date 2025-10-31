@@ -25,31 +25,31 @@ const defaultSettings = {
     manualCharacters: "",
     excludeNames: "",
     excludeUser: true,
+    autoUpdate: false,
     
     updateThreshold: 20,
-    entryLength: "short",
-    journalPrompt: `你是记忆记录助手。请为每个角色写多条第一人称日志条目，每条记录一个独立的事件。
+    journalPrompt: `你是记忆记录助手。请为每个角色写**多条**第一人称日志条目，每条记录一个独立的事件。
 
 要求：
 1. 使用第一人称（我、我的）
-2. 每个事件独立成条，包含：日期/时间 + 事件 + 感受/想法
-3. 每条日志{LENGTH_CONSTRAINT}
-4. 一个角色可以有多条日志（取决于发生了多少事件）
-5. 如果角色未出场，写：【本轮未出场】
+2. 每个事件独立成条，格式：时间标记 + 事件 + 感受/想法
+3. 时间标记可以灵活使用：具体时间（早上/下午）、日期（某月某日）、节日（春节/中秋）、事件节点（XX事件前/中/后）等
+4. 每条日志控制在50-100字左右
+5. 一个角色可以有多条日志（取决于发生了多少事件）
+6. 如果角色未出场，写：【本轮未出场】
 
-输出格式：
+输出格式示例：
 ===角色:炽霞===
-• 早上在巡逻时遇到了杨，昨晚的事让我有些不知所措，但还是强装镇定。走路时身体还有些不适，希望他没注意到。
-• 巡逻中听到呼救声，立刻切换到工作模式。杨跟了上来，虽然有些意外，但多个人手总是好的。
+• 早上巡逻时 - 遇到了杨，昨晚的事让我有些不知所措，但还是强装镇定。走路时身体还有些不适，希望他没注意到。
+• 巡逻途中 - 听到呼救声，立刻切换到工作模式。杨跟了上来，虽然有些意外，但多个人手总是好的。
 ===角色:小系统===
-• 一早就开始调侃宿主昨晚的"战绩"，看他窘迫的样子真有趣。
-• 检测到附近有异常能量波动，提醒宿主注意，可能有麻烦要来了。
+• 清晨时分 - 一早就开始调侃宿主昨晚的"战绩"，看他窘迫的样子真有趣。
+• 能量异常 - 检测到附近有异常能量波动，提醒宿主注意，可能有麻烦要来了。
 ===END===
 
-注意：
-1. 严格按照指定的角色列表生成日志
-2. 不要为列表外的角色生成内容
-3. 不要生成世界名、地点名、系统提示等非角色内容`,
+禁止事项：
+❌ 禁止生成男性的日志
+❌ 不要为非角色实体生成日志（世界名、地点、组织等）`,
     
     autoRefine: false,
     refineThreshold: 5000,
@@ -312,33 +312,45 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
         .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
         .join('\n');
     
-    // 直接使用AI识别角色
-    toastr.info('AI正在识别角色...', '角色日志');
-    const finalCharacters = await detectCharactersByAI(messages);
+    // 根据检测模式获取角色列表
+    let finalCharacters;
     
-    if (!finalCharacters || finalCharacters.length === 0) {
-        toastr.warning('AI未能识别到角色', '角色日志');
-        return null;
+    if (settings.detectionMode === "manual" && settings.manualCharacters) {
+        // 手动模式：使用用户输入的角色列表
+        const manualNames = settings.manualCharacters
+            .split(',')
+            .map(name => name.trim())
+            .filter(Boolean);
+        
+        if (manualNames.length === 0) {
+            toastr.warning('请在设置中填写要跟踪的角色名', '角色日志');
+            return null;
+        }
+        
+        finalCharacters = manualNames.map(name => ({
+            name: name,
+            count: 0,
+            isUser: false
+        }));
+        
+        console.log('[角色日志] 手动模式 - 使用用户指定的角色:', manualNames);
+    } else {
+        // 自动模式：使用AI识别角色
+        toastr.info('AI正在识别角色...', '角色日志');
+        finalCharacters = await detectCharactersByAI(messages);
+        
+        if (!finalCharacters || finalCharacters.length === 0) {
+            toastr.warning('AI未能识别到角色', '角色日志');
+            return null;
+        }
     }
     
     const characterList = finalCharacters.map(c => c.name).join(', ');
     
-    // 根据长度设置动态生成字数约束
-    const lengthConstraints = {
-        'very_short': '50字以内',
-        'short': '50-100字',
-        'medium': '100-200字',
-        'long': '200-300字'
-    };
-    const lengthConstraint = lengthConstraints[settings.entryLength] || '50-100字';
-    
-    // 替换提示词中的长度约束占位符
-    const promptWithLength = settings.journalPrompt.replace(/{LENGTH_CONSTRAINT}/g, lengthConstraint);
-    
     const aiMessages = [
         { 
             role: 'system', 
-            content: promptWithLength 
+            content: settings.journalPrompt 
         },
         { 
             role: 'user', 
@@ -635,7 +647,6 @@ function loadSettings() {
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
     
     $('#cj_update_threshold').val(settings.updateThreshold);
-    $('#cj_entry_length').val(settings.entryLength);
     $('#cj_journal_prompt').val(settings.journalPrompt);
     
     $('#cj_auto_refine').prop('checked', settings.autoRefine);
@@ -668,7 +679,6 @@ function saveSettings() {
     settings.excludeUser = $('#cj_exclude_user').prop('checked');
     
     settings.updateThreshold = parseInt($('#cj_update_threshold').val());
-    settings.entryLength = $('#cj_entry_length').val();
     settings.journalPrompt = $('#cj_journal_prompt').val();
     
     settings.autoRefine = $('#cj_auto_refine').prop('checked');
