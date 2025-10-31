@@ -298,6 +298,64 @@ ${formattedHistory}
     }));
 }
 
+// 获取角色相关的世界书信息
+async function getCharacterWorldInfo(characterName) {
+    try {
+        const context = getContext();
+        const chatMetadata = context.chat_metadata || {};
+        const worldbooks = [];
+        
+        // 获取当前聊天绑定的世界书
+        if (chatMetadata.world_info) {
+            worldbooks.push(chatMetadata.world_info);
+        }
+        
+        // 获取角色卡绑定的世界书
+        if (context.characterId) {
+            const char = characters[context.characterId];
+            if (char && char.data && char.data.character_book) {
+                worldbooks.push(char.data.character_book);
+            }
+        }
+        
+        let characterInfo = '';
+        
+        // 遍历所有世界书，查找与该角色相关的条目
+        for (const bookName of worldbooks) {
+            try {
+                const bookData = await loadWorldInfo(bookName);
+                if (!bookData || !bookData.entries) continue;
+                
+                // 查找包含该角色名的条目
+                const relevantEntries = Object.values(bookData.entries).filter(entry => {
+                    if (entry.disable) return false;
+                    
+                    // 检查关键词是否包含角色名
+                    const allKeys = [...(entry.key || []), ...(entry.keysecondary || [])];
+                    return allKeys.some(key => 
+                        key.toLowerCase().includes(characterName.toLowerCase()) ||
+                        characterName.toLowerCase().includes(key.toLowerCase())
+                    );
+                });
+                
+                // 提取相关信息
+                for (const entry of relevantEntries) {
+                    if (entry.content && !entry.comment?.includes('Journal') && !entry.comment?.includes('Archive')) {
+                        characterInfo += `\n${entry.content}\n`;
+                    }
+                }
+            } catch (error) {
+                console.log(`[角色日志] 无法读取世界书 ${bookName}`);
+            }
+        }
+        
+        return characterInfo.trim();
+    } catch (error) {
+        console.error('[角色日志] 获取角色信息失败:', error);
+        return '';
+    }
+}
+
 // 生成角色日志
 async function generateCharacterJournals(startFloor, endFloor, characters) {
     const settings = extension_settings[extensionName];
@@ -347,6 +405,27 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     
     const characterList = finalCharacters.map(c => c.name).join(', ');
     
+    // 获取每个角色的世界书信息
+    toastr.info('正在获取角色资料...', '角色日志');
+    const characterInfoMap = new Map();
+    for (const char of finalCharacters) {
+        const info = await getCharacterWorldInfo(char.name);
+        if (info) {
+            characterInfoMap.set(char.name, info);
+            console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 200) + '...');
+        }
+    }
+    
+    // 构建包含角色资料的提示
+    let characterInfoSection = '';
+    if (characterInfoMap.size > 0) {
+        characterInfoSection = '\n\n===角色资料===\n';
+        for (const [name, info] of characterInfoMap.entries()) {
+            characterInfoSection += `\n【${name}】\n${info}\n`;
+        }
+        characterInfoSection += '===资料结束===\n';
+    }
+    
     const aiMessages = [
         { 
             role: 'system', 
@@ -354,11 +433,12 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
         },
         { 
             role: 'user', 
-            content: `要跟踪的角色: ${characterList}\n\n对话记录:\n${formattedHistory}` 
+            content: `要跟踪的角色: ${characterList}${characterInfoSection}\n对话记录:\n${formattedHistory}` 
         }
     ];
     
     console.log('[角色日志] 发送给AI的角色列表:', characterList);
+    console.log('[角色日志] 包含角色资料数:', characterInfoMap.size);
     console.log('[角色日志] 对话记录长度:', formattedHistory.length);
     
     toastr.info('正在生成角色日志...', '角色日志');
