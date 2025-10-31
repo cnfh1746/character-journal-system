@@ -441,7 +441,27 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     
     const characterList = finalCharacters.map(c => c.name).join(', ');
     
-    // 不预先读取世界书，只发送角色列表和对话记录
+    // 获取每个角色的世界书信息
+    toastr.info('正在获取角色资料...', '角色日志');
+    const characterInfoMap = new Map();
+    for (const char of finalCharacters) {
+        const info = await getCharacterWorldInfo(char.name);
+        if (info) {
+            characterInfoMap.set(char.name, info);
+            console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 200) + '...');
+        }
+    }
+    
+    // 构建包含角色资料的提示
+    let characterInfoSection = '';
+    if (characterInfoMap.size > 0) {
+        characterInfoSection = '\n\n===角色资料===\n';
+        for (const [name, info] of characterInfoMap.entries()) {
+            characterInfoSection += `\n【${name}】\n${info}\n`;
+        }
+        characterInfoSection += '===资料结束===\n';
+    }
+    
     const aiMessages = [
         { 
             role: 'system', 
@@ -449,11 +469,12 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
         },
         { 
             role: 'user', 
-            content: `要跟踪的角色: ${characterList}\n\n对话记录:\n${formattedHistory}` 
+            content: `要跟踪的角色: ${characterList}${characterInfoSection}\n对话记录:\n${formattedHistory}` 
         }
     ];
     
     console.log('[角色日志] 发送给AI的角色列表:', characterList);
+    console.log('[角色日志] 包含角色资料数:', characterInfoMap.size);
     console.log('[角色日志] 对话记录长度:', formattedHistory.length);
     
     toastr.info('正在生成角色日志...', '角色日志');
@@ -475,29 +496,9 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     console.log('[角色日志] AI响应内容:', response.substring(0, 500) + '...');
     
     const journals = parseCharacterJournals(response);
-    console.log('[角色日志] 解析到的角色:', Array.from(journals.keys()));
+    console.log('[角色日志] 解析结果:', Array.from(journals.keys()));
     
-    // 现在为每个角色补充世界书信息（单独读取，不一次性读取所有）
-    toastr.info('正在为角色补充资料...', '角色日志');
-    const enrichedJournals = new Map();
-    
-    for (const [charName, journalContent] of journals.entries()) {
-        console.log(`[角色日志] 正在读取${charName}的世界书资料...`);
-        const charInfo = await getCharacterWorldInfo(charName);
-        
-        let enrichedContent = journalContent;
-        
-        // 如果有世界书信息，添加到日志前面作为背景
-        if (charInfo) {
-            console.log(`[角色日志] ${charName}的资料长度:`, charInfo.length);
-            enrichedContent = `【角色设定】\n${charInfo}\n\n---\n\n${journalContent}`;
-        }
-        
-        enrichedJournals.set(charName, enrichedContent);
-    }
-    
-    console.log('[角色日志] 资料补充完成');
-    return enrichedJournals;
+    return journals;
 }
 
 // 更新角色日志条目
