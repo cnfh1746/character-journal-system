@@ -1541,7 +1541,7 @@ function initModalDragAndMinimize(modalSelector) {
     }
 }
 
-// 执行批量更新（优化版：合并同批次角色，减少API调用）
+// 执行批量更新（新版：每批次都识别角色，确保不遗漏）
 async function executeBatchUpdate(startFloor, endFloor) {
     const settings = extension_settings[extensionName];
     const threshold = settings.updateThreshold;
@@ -1593,41 +1593,60 @@ async function executeBatchUpdate(startFloor, endFloor) {
         $('#batch_progress_info').html(info);
     }
     
-    // 为每个批次更新日志（优化：合并所有角色，只调用1次API）
+    // 为每个批次更新日志（新版：每批次都识别角色）
     for (let i = 0; i < batches.length; i++) {
         const batch = batches[i];
         const batchInfo = `批次 ${i + 1}/${totalBatches}: 第${batch.start}-${batch.end}楼`;
         
         console.log(`[角色日志] ${batchInfo}`);
-        updateProgress(i, totalBatches, `${batchInfo}<br>正在生成日志...`);
+        updateProgress(i, totalBatches, `${batchInfo}<br>步骤1/2: 识别角色...`);
         
-        // 🔧 优化：收集本批次需要更新的所有角色
-        const charactersToUpdate = [];
+        // 🔧 步骤1：识别本批次的新角色（排除已有角色）
+        const existingCharacters = Array.from(characterProgresses.keys());
+        const messages = getUnloggedMessages(batch.start, batch.end, null);
         
-        if (characterProgresses.size > 0) {
-            // 收集需要更新的已有角色
-            for (const [charName, progress] of characterProgresses.entries()) {
-                if (progress < batch.end) {
-                    const charStartFloor = Math.max(progress + 1, batch.start);
-                    if (charStartFloor <= batch.end) {
-                        charactersToUpdate.push(charName);
-                    }
-                }
+        if (messages.length === 0) {
+            console.log('[角色日志] 本批次没有有效消息，跳过');
+            completedBatches++;
+            continue;
+        }
+        
+        console.log(`[角色日志] 步骤1: 识别本批次新角色（已排除 ${existingCharacters.length} 个已有角色）`);
+        
+        // 调用AI识别新角色
+        const newCharacters = await detectCharactersByAI(messages, existingCharacters);
+        console.log(`[角色日志] AI识别到 ${newCharacters.length} 个新角色:`, newCharacters.map(c => c.name).join(', ') || '无');
+        
+        // 🔧 步骤2：合并已有角色 + 新识别的角色
+        const allCharactersForBatch = [...existingCharacters];
+        const newCharNames = newCharacters.map(c => c.name);
+        allCharactersForBatch.push(...newCharNames);
+        
+        // 更新已有角色的进度映射（添加新角色）
+        for (const newCharName of newCharNames) {
+            if (!characterProgresses.has(newCharName)) {
+                characterProgresses.set(newCharName, 0); // 新角色进度为0
             }
         }
         
-        // 🔧 优化：一次性为所有角色生成日志（包括识别新角色）
+        if (allCharactersForBatch.length === 0) {
+            console.log('[角色日志] 本批次没有角色需要更新');
+            completedBatches++;
+            updateProgress(completedBatches, totalBatches, `✓ 已完成 ${completedBatches}/${totalBatches} 批次`);
+            continue;
+        }
+        
+        console.log(`[角色日志] 步骤2: 为 ${allCharactersForBatch.length} 个角色生成日志:`, allCharactersForBatch.join(', '));
+        updateProgress(i, totalBatches, `${batchInfo}<br>步骤2/2: 生成 ${allCharactersForBatch.length} 个角色的日志...`);
+        
+        // 调用AI生成日志（为所有角色一次性生成）
         const rangeInfo = {
-            characters: charactersToUpdate.length > 0 ? charactersToUpdate : null,
+            characters: allCharactersForBatch,
             startFloor: batch.start,
             endFloor: batch.end,
-            isExisting: charactersToUpdate.length > 0,
-            existingCharacters: Array.from(characterProgresses.keys())
+            isExisting: true
         };
         
-        console.log(`[角色日志] 本批次处理角色:`, charactersToUpdate.length > 0 ? charactersToUpdate.join(', ') : '自动识别');
-        
-        // 一次API调用生成所有角色的日志
         const journals = await generateCharacterJournals(rangeInfo.startFloor, rangeInfo.endFloor, rangeInfo);
         
         if (journals && journals.size > 0) {
