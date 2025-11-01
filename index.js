@@ -899,41 +899,31 @@ async function executeJournalUpdate() {
         let updateRanges = [];
         
         if (characterProgresses.size > 0) {
-            // 已有角色日志，为每个角色计算更新范围
-            // 同时找出最大进度，用于识别新角色
+            // ✅ 修复：找出最大进度，统一从最大进度往后读取
             const maxProgress = Math.max(...Array.from(characterProgresses.values()));
+            const allCharacters = Array.from(characterProgresses.keys());
             
-            for (const [charName, progress] of characterProgresses.entries()) {
-                const startFloor = progress + 1;
-                const endFloor = Math.min(progress + settings.updateThreshold, context.chat.length);
-                
-                if (startFloor <= context.chat.length) {
-                    updateRanges.push({
-                        characters: [charName],
-                        startFloor: startFloor,
-                        endFloor: endFloor,
-                        isExisting: true
-                    });
-                }
-            }
+            console.log(`[角色日志] 所有角色的最大进度: ${maxProgress}楼`);
+            console.log(`[角色日志] 将为所有角色统一读取: ${maxProgress + 1}楼往后`);
             
-            // 重要：在最大进度之后识别新角色（即使已有角色日志是最新的）
-            if (maxProgress < context.chat.length) {
-                const newCharStartFloor = maxProgress + 1;
-                const newCharEndFloor = Math.min(maxProgress + settings.updateThreshold, context.chat.length);
+            // 从最大进度往后，按阈值分批，所有角色一起更新
+            let currentFloor = maxProgress + 1;
+            while (currentFloor <= context.chat.length) {
+                const batchEnd = Math.min(currentFloor + settings.updateThreshold - 1, context.chat.length);
                 
-                // 添加一个识别新角色的范围
                 updateRanges.push({
-                    characters: null, // AI自动识别
-                    startFloor: newCharStartFloor,
-                    endFloor: newCharEndFloor,
-                    isExisting: false,
-                    existingCharacters: Array.from(characterProgresses.keys()) // 传递已存在的角色列表用于排除
+                    characters: allCharacters, // 所有已有角色一起处理
+                    startFloor: currentFloor,
+                    endFloor: batchEnd,
+                    isExisting: true
                 });
                 
-                console.log(`[角色日志] 将在第${newCharStartFloor}-${newCharEndFloor}楼范围内识别新角色`);
-            } else if (updateRanges.length === 0) {
-                toastr.info('所有已跟踪的角色日志都是最新的，且没有新消息', '角色日志');
+                console.log(`[角色日志] 添加更新范围: ${currentFloor}-${batchEnd}楼 (所有${allCharacters.length}个角色)`);
+                currentFloor = batchEnd + 1;
+            }
+            
+            if (updateRanges.length === 0) {
+                toastr.info('所有已跟踪的角色日志都是最新的', '角色日志');
             }
         } else {
             // 没有任何日志，从头开始
