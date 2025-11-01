@@ -21,6 +21,7 @@ const PROGRESS_SEAL_REGEX = /【已更新至第 (\d+) 楼】$/;
 const defaultSettings = {
     enabled: false,
     target: "character_main",
+    dedicatedWorldbook: "",
     detectionMode: "auto",
     manualCharacters: "",
     excludeNames: "",
@@ -109,8 +110,15 @@ async function getTargetLorebookName() {
         const charName = context.name2 || "character";
         return `${charName}-Journal-${chatId}`;
     } else {
-        const chatId = context.chatId || "unknown";
-        return `CharacterJournal-${chatId}`;
+        // 专用世界书模式
+        if (settings.dedicatedWorldbook && settings.dedicatedWorldbook.trim()) {
+            // 使用自定义名称
+            return settings.dedicatedWorldbook.trim();
+        } else {
+            // 自动生成名称
+            const chatId = context.chatId || "unknown";
+            return `CharacterJournal-${chatId}`;
+        }
     }
 }
 
@@ -318,7 +326,7 @@ function parseCharacterJournals(response) {
 }
 
 // AI识别角色
-async function detectCharactersByAI(messages) {
+async function detectCharactersByAI(messages, existingCharacters = []) {
     const context = getContext();
     const settings = extension_settings[extensionName];
     const userName = context.name1 || '用户';
@@ -335,6 +343,11 @@ async function detectCharactersByAI(messages) {
     }
     if (settings.excludeNames) {
         excludeList.push(...settings.excludeNames.split(',').map(n => n.trim()).filter(Boolean));
+    }
+    // 添加已存在的角色到排除列表
+    if (existingCharacters && existingCharacters.length > 0) {
+        excludeList.push(...existingCharacters);
+        console.log('[角色日志] 排除已有角色:', existingCharacters);
     }
     
     const detectPrompt = `你是角色识别助手。请分析以下小说式剧情文本，识别出所有出场的角色名字。
@@ -477,10 +490,13 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     } else {
         // 自动模式：使用AI识别角色
         toastr.info('AI正在识别角色...', '角色日志');
-        finalCharacters = await detectCharactersByAI(messages);
+        // 如果有传入已存在的角色列表，传递给AI识别函数用于排除
+        const existingChars = characters?.existingCharacters || [];
+        finalCharacters = await detectCharactersByAI(messages, existingChars);
         
         if (!finalCharacters || finalCharacters.length === 0) {
-            toastr.warning('AI未能识别到角色', '角色日志');
+            console.log('[角色日志] AI未识别到新角色（可能都已存在）');
+            toastr.warning('AI未能识别到新角色', '角色日志');
             return null;
         }
     }
@@ -668,8 +684,8 @@ async function executeJournalUpdate() {
     try {
         const lorebookName = await getTargetLorebookName();
         
-        // 读取所有已存在的日志进度，找出最小值
-        let minProgress = 0;
+        // 读取所有已存在的角色及其进度
+        const characterProgresses = new Map();
         try {
             const bookData = await loadWorldInfo(lorebookName);
             if (bookData && bookData.entries) {
@@ -677,56 +693,116 @@ async function executeJournalUpdate() {
                     e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
                 );
                 
-                if (journalEntries.length > 0) {
-                    minProgress = Infinity;
-                    for (const entry of journalEntries) {
-                        const match = entry.content.match(PROGRESS_SEAL_REGEX);
-                        const progress = match ? parseInt(match[1], 10) : 0;
-                        minProgress = Math.min(minProgress, progress);
-                    }
-                    if (minProgress === Infinity) {
-                        minProgress = 0;
-                    }
+                for (const entry of journalEntries) {
+                    const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
+                    const match = entry.content.match(PROGRESS_SEAL_REGEX);
+                    const progress = match ? parseInt(match[1], 10) : 0;
+                    characterProgresses.set(charName, progress);
                 }
             }
         } catch (error) {
-            console.log('[角色日志] 无法读取现有进度，从头开始');
-            minProgress = 0;
+            console.log('[角色日志] 无法读取现有进度，将自动识别角色');
         }
         
-        const startFloor = minProgress + 1;
-        const endFloor = Math.min(minProgress + settings.updateThreshold, context.chat.length);
+        let updateRanges = [];
         
-        if (startFloor > context.chat.length) {
+        if (characterProgresses.size > 0) {
+            // 已有角色日志，为每个角色计算更新范围
+            // 同时找出最大进度，用于识别新角色
+            const maxProgress = Math.max(...Array.from(characterProgresses.values()));
+            
+            for (const [charName, progress] of characterProgresses.entries()) {
+                const startFloor = progress + 1;
+                const endFloor = Math.min(progress + settings.updateThreshold, context.chat.length);
+                
+                if (startFloor <= context.chat.length) {
+                    updateRanges.push({
+                        characters: [charName],
+                        startFloor: startFloor,
+                        endFloor: endFloor,
+                        isExisting: true
+                    });
+                }
+            }
+            
+            // 重要：在最大进度之后识别新角色（即使已有角色日志是最新的）
+            if (maxProgress < context.chat.length) {
+                const newCharStartFloor = maxProgress + 1;
+                const newCharEndFloor = Math.min(maxProgress + settings.updateThreshold, context.chat.length);
+                
+                // 添加一个识别新角色的范围
+                updateRanges.push({
+                    characters: null, // AI自动识别
+                    startFloor: newCharStartFloor,
+                    endFloor: newCharEndFloor,
+                    isExisting: false,
+                    existingCharacters: Array.from(characterProgresses.keys()) // 传递已存在的角色列表用于排除
+                });
+                
+                console.log(`[角色日志] 将在第${newCharStartFloor}-${newCharEndFloor}楼范围内识别新角色`);
+            } else if (updateRanges.length === 0) {
+                toastr.info('所有已跟踪的角色日志都是最新的，且没有新消息', '角色日志');
+            }
+        } else {
+            // 没有任何日志，从头开始
+            const startFloor = 1;
+            const endFloor = Math.min(settings.updateThreshold, context.chat.length);
+            updateRanges.push({
+                characters: null, // AI自动识别
+                startFloor: startFloor,
+                endFloor: endFloor,
+                isExisting: false
+            });
+        }
+        
+        if (updateRanges.length === 0) {
             toastr.info('所有角色日志都是最新的', '角色日志');
             return false;
         }
         
-        console.log(`[角色日志] 更新范围: ${startFloor}-${endFloor}楼`);
-        
-        // 生成所有角色的日志（AI会自动识别角色）
-        const journals = await generateCharacterJournals(startFloor, endFloor, null);
-        
-        if (!journals || journals.size === 0) {
-            toastr.warning('未能生成任何日志', '角色日志');
-            return false;
-        }
-        
-        // 更新每个角色的日志条目
-        let successCount = 0;
-        for (const [charName, journalContent] of journals.entries()) {
-            const success = await updateCharacterJournal(charName, journalContent, startFloor, endFloor);
-            if (success) {
-                successCount++;
+        // 按楼层范围合并相同的更新
+        const rangeMap = new Map();
+        for (const range of updateRanges) {
+            const key = `${range.startFloor}-${range.endFloor}`;
+            if (!rangeMap.has(key)) {
+                rangeMap.set(key, range);
+            } else if (range.characters) {
+                const existing = rangeMap.get(key);
+                if (existing.characters) {
+                    existing.characters.push(...range.characters);
+                }
             }
         }
         
-        if (successCount > 0) {
-            toastr.success(`成功更新了 ${successCount} 个角色的日志`, '角色日志');
+        // 执行更新
+        let totalSuccessCount = 0;
+        for (const range of rangeMap.values()) {
+            console.log(`[角色日志] 更新范围: ${range.startFloor}-${range.endFloor}楼`, 
+                        range.characters ? `角色: ${range.characters.join(', ')}` : '自动识别角色');
+            
+            // 传递range对象，其中可能包含existingCharacters信息
+            const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
+            
+            if (!journals || journals.size === 0) {
+                console.log('[角色日志] 该范围未生成任何日志');
+                continue;
+            }
+            
+            // 更新每个角色的日志条目
+            for (const [charName, journalContent] of journals.entries()) {
+                const success = await updateCharacterJournal(charName, journalContent, range.startFloor, range.endFloor);
+                if (success) {
+                    totalSuccessCount++;
+                }
+            }
+        }
+        
+        if (totalSuccessCount > 0) {
+            toastr.success(`成功更新了 ${totalSuccessCount} 个角色的日志`, '角色日志');
             await updateStatus();
             return true;
         } else {
-            toastr.error('所有日志更新都失败了', '角色日志');
+            toastr.warning('未能生成任何日志', '角色日志');
             return false;
         }
     } catch (error) {
@@ -822,11 +898,19 @@ function loadSettings() {
     
     $('#cj_enabled').prop('checked', settings.enabled);
     $('#cj_target').val(settings.target);
+    $('#cj_dedicated_worldbook').val(settings.dedicatedWorldbook || '');
     $('#cj_detection_mode').val(settings.detectionMode);
     $('#cj_manual_characters').val(settings.manualCharacters);
     $('#cj_exclude_names').val(settings.excludeNames || '');
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
     $('#cj_use_worldinfo').prop('checked', settings.useWorldInfo);
+    
+    // 根据target值显示/隐藏专用世界书字段
+    if (settings.target === 'dedicated') {
+        $('#cj_dedicated_worldbook_field').show();
+    } else {
+        $('#cj_dedicated_worldbook_field').hide();
+    }
     
     $('#cj_update_threshold').val(settings.updateThreshold);
     $('#cj_journal_prompt').val(settings.journalPrompt);
@@ -855,6 +939,7 @@ function saveSettings() {
     
     settings.enabled = $('#cj_enabled').prop('checked');
     settings.target = $('#cj_target').val();
+    settings.dedicatedWorldbook = $('#cj_dedicated_worldbook').val();
     settings.detectionMode = $('#cj_detection_mode').val();
     settings.manualCharacters = $('#cj_manual_characters').val();
     settings.excludeNames = $('#cj_exclude_names').val();
@@ -1292,6 +1377,88 @@ function setupUIHandlers() {
             updateStatus();
         }
     });
+    
+    // 目标世界书改变时显示/隐藏专用世界书字段
+    $('#cj_target').on('change', function() {
+        if ($(this).val() === 'dedicated') {
+            $('#cj_dedicated_worldbook_field').slideDown();
+        } else {
+            $('#cj_dedicated_worldbook_field').slideUp();
+        }
+        updateStatus();
+    });
+    
+    // 选择现有世界书按钮
+    $('#cj_select_worldbook').on('click', selectWorldbook);
+}
+
+// 选择现有世界书
+async function selectWorldbook() {
+    try {
+        // 动态导入 world_names
+        const { world_names } = await import('/scripts/world-info.js');
+        
+        if (!world_names || world_names.length === 0) {
+            toastr.info('没有找到世界书', '角色日志');
+            return;
+        }
+        
+        // 处理世界书名称（去除.json后缀）
+        const worldbooks = world_names.map(filename => {
+            return filename.replace('.json', '');
+        });
+        
+        console.log('[角色日志] 找到世界书:', worldbooks);
+        
+        // 创建世界书选择对话框
+        const modalHtml = `
+            <div class="character-journal-modal" id="worldbook_select_modal">
+                <div class="character-journal-modal-content" style="max-width: 600px;">
+                    <div class="character-journal-modal-header">
+                        <h2>选择世界书</h2>
+                    </div>
+                    <div class="character-journal-modal-body">
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${worldbooks.map(wb => `
+                                <div class="character-list-item" style="cursor: pointer; padding: 12px;" data-worldbook="${wb}">
+                                    <span style="flex: 1; color: #212121;">📚 ${wb}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="character-journal-modal-footer">
+                        <button class="character-journal-btn" id="close_worldbook_modal">取消</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('body').append(modalHtml);
+        
+        // 点击世界书项选择
+        $('.character-list-item[data-worldbook]').on('click', function() {
+            const selectedWorldbook = $(this).attr('data-worldbook');
+            $('#cj_dedicated_worldbook').val(selectedWorldbook);
+            $('#worldbook_select_modal').remove();
+            toastr.success(`已选择世界书: ${selectedWorldbook}`, '角色日志');
+        });
+        
+        // 关闭按钮
+        $('#close_worldbook_modal').on('click', function() {
+            $('#worldbook_select_modal').remove();
+        });
+        
+        // 点击背景关闭
+        $('#worldbook_select_modal').on('click', function(e) {
+            if (e.target.id === 'worldbook_select_modal') {
+                $(this).remove();
+            }
+        });
+        
+    } catch (error) {
+        console.error('[角色日志] 选择世界书失败:', error);
+        toastr.error(`选择世界书失败: ${error.message}`, '角色日志');
+    }
 }
 
 // 初始化扩展

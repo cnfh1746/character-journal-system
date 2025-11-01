@@ -24,6 +24,15 @@
             <small>选择将日志写入角色的主世界书还是创建专用世界书</small>
         </div>
 
+        <div class="character-journal-field" id="cj_dedicated_worldbook_field" style="display: none;">
+            <label for="cj_dedicated_worldbook">专用世界书名称：</label>
+            <div style="display: flex; gap: 8px;">
+                <input type="text" id="cj_dedicated_worldbook" placeholder="输入世界书名称或留空自动生成" style="flex: 1;">
+                <button class="character-journal-btn" id="cj_select_worldbook" style="padding: 8px 12px; white-space: nowrap;">📚 选择现有</button>
+            </div>
+            <small>自定义世界书名称，留空则自动生成（CharacterJournal-聊天ID）</small>
+        </div>
+
         <div class="character-journal-field">
             <label for="cj_detection_mode">角色检测模式：</label>
             <select id="cj_detection_mode">
