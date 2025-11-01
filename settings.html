@@ -90,36 +90,22 @@
         
         <div class="character-journal-info" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
             <strong>💡 说明：</strong><br>
-            AI识别后，程序会根据以下条件自动过滤不需要的角色。<br>
-            这样可以排除配角、男性角色等，确保只为重要女性角色生成日志。
+            • <strong>性别筛选</strong>已由AI根据世界书资料自动判断（更准确）<br>
+            • 这里仅保留<strong>出场次数过滤</strong>（纯统计，可选）
         </div>
 
         <div class="character-journal-field">
             <label>
                 <input type="checkbox" id="cj_filter_enabled">
-                启用智能过滤
+                启用出场次数过滤
             </label>
-            <small>AI识别后，用代码进一步过滤角色</small>
-        </div>
-
-        <div class="character-journal-field">
-            <label for="cj_filter_keywords">性别过滤关键词（逗号分隔）：</label>
-            <input type="text" id="cj_filter_keywords" placeholder="例如: 男,男性,他,少年,小伙">
-            <small>在世界书资料中检测到这些词就排除（用于识别男性角色）</small>
+            <small>过滤出场次数太少的配角</small>
         </div>
 
         <div class="character-journal-field">
             <label for="cj_min_appearances">最小出场次数：</label>
             <input type="number" id="cj_min_appearances" min="0" max="50" value="5">
             <small>角色名字在对话中出现少于此次数就排除（用于过滤配角）。设为0则不过滤。</small>
-        </div>
-
-        <div class="character-journal-field">
-            <label>
-                <input type="checkbox" id="cj_filter_no_worldinfo">
-                排除世界书中没有资料的角色
-            </label>
-            <small>如果角色在世界书中找不到任何信息，可能是配角或识别错误</small>
         </div>
     </div>
 

@@ -31,9 +31,7 @@ const defaultSettings = {
     
     // 智能过滤设置
     filterEnabled: true,
-    filterKeywords: "男,男性,他,少年,小伙,男主,男角色",
     minAppearances: 5,
-    filterNoWorldinfo: false,
     
     updateThreshold: 20,
     journalPrompt: `你是记忆记录助手。我会提供一些名字和它们的世界书资料，请根据资料和对话记录判断哪些是**实际的角色**并为其生成第一人称日志。
@@ -352,79 +350,46 @@ function parseCharacterJournals(response, allowedCharacters = null) {
     return journals;
 }
 
-// 智能过滤角色
-async function filterCharacters(characters, messages, characterInfoMap) {
+// 智能过滤角色（仅保留出场次数过滤）
+async function filterCharacters(characters, messages) {
     const settings = extension_settings[extensionName];
     
     // 如果未启用过滤，直接返回
     if (!settings.filterEnabled) {
-        console.log('[角色日志] 智能过滤已禁用');
+        console.log('[角色日志] 出场次数过滤已禁用');
         return characters;
     }
     
-    console.log(`[角色日志] 开始智能过滤，待过滤角色数: ${characters.length}`);
+    // 如果最小出场次数为0，不过滤
+    if (settings.minAppearances <= 0) {
+        console.log('[角色日志] 最小出场次数为0，跳过过滤');
+        return characters;
+    }
+    
+    console.log(`[角色日志] 开始出场次数过滤，待过滤角色数: ${characters.length}`);
     
     const filtered = [];
-    const context = getContext();
-    const chat = context.chat;
     
     // 合并所有对话文本用于统计出场次数
     const fullChatText = messages.map(m => m.content).join('\n');
     
     for (const char of characters) {
         const charName = char.name || char;
-        let shouldFilter = false;
-        let filterReason = '';
         
-        // 1. 检查出场次数
-        if (settings.minAppearances > 0) {
-            // 统计名字在对话中出现的次数
-            const regex = new RegExp(charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-            const matches = fullChatText.match(regex);
-            const appearanceCount = matches ? matches.length : 0;
-            
-            if (appearanceCount < settings.minAppearances) {
-                shouldFilter = true;
-                filterReason = `出场次数不足(${appearanceCount}次 < ${settings.minAppearances}次)`;
-            }
-        }
+        // 统计名字在对话中出现的次数
+        const regex = new RegExp(charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        const matches = fullChatText.match(regex);
+        const appearanceCount = matches ? matches.length : 0;
         
-        // 2. 检查世界书资料
-        if (!shouldFilter && characterInfoMap) {
-            const worldInfo = characterInfoMap.get(charName);
-            
-            // 检查是否有世界书资料
-            if (settings.filterNoWorldinfo && (!worldInfo || worldInfo.trim().length === 0)) {
-                shouldFilter = true;
-                filterReason = '世界书中无资料';
-            }
-            
-            // 检查性别关键词
-            if (!shouldFilter && worldInfo && settings.filterKeywords) {
-                const keywords = settings.filterKeywords
-                    .split(',')
-                    .map(k => k.trim())
-                    .filter(Boolean);
-                
-                for (const keyword of keywords) {
-                    if (worldInfo.includes(keyword)) {
-                        shouldFilter = true;
-                        filterReason = `世界书资料包含过滤关键词"${keyword}"`;
-                        break;
-                    }
-                }
-            }
-        }
-        
-        if (shouldFilter) {
-            console.log(`[角色日志] ❌ 过滤角色: ${charName} - ${filterReason}`);
+        if (appearanceCount < settings.minAppearances) {
+            console.log(`[角色日志] ❌ 过滤角色: ${charName} - 出场次数不足(${appearanceCount}次 < ${settings.minAppearances}次)`);
         } else {
-            console.log(`[角色日志] ✓ 保留角色: ${charName}`);
+            console.log(`[角色日志] ✓ 保留角色: ${charName} (出现${appearanceCount}次)`);
             filtered.push(char);
         }
     }
     
-    console.log(`[角色日志] 过滤完成: ${characters.length} -> ${filtered.length}`);
+    console.log(`[角色日志] 出场次数过滤完成: ${characters.length} -> ${filtered.length}`);
     return filtered;
 }
 
@@ -628,30 +593,22 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
             return null;
         }
         
-        // 🔧 应用智能过滤（在AI识别之后）
-        if (settings.filterEnabled && settings.useWorldInfo) {
-            toastr.info('正在应用智能过滤...', '角色日志');
+        // 🔧 应用出场次数过滤（在AI识别之后）
+        if (settings.filterEnabled && settings.minAppearances > 0) {
+            toastr.info('正在应用出场次数过滤...', '角色日志');
             
-            // 先获取所有角色的世界书信息用于过滤
-            const characterInfoMap = new Map();
-            for (const char of finalCharacters) {
-                const info = await getCharacterWorldInfo(char.name);
-                characterInfoMap.set(char.name, info || '');
-            }
-            
-            // 应用过滤
             const beforeCount = finalCharacters.length;
-            finalCharacters = await filterCharacters(finalCharacters, messages, characterInfoMap);
+            finalCharacters = await filterCharacters(finalCharacters, messages);
             const afterCount = finalCharacters.length;
             
             if (afterCount < beforeCount) {
-                console.log(`[角色日志] 智能过滤: ${beforeCount} -> ${afterCount} (过滤掉 ${beforeCount - afterCount} 个)`);
-                toastr.info(`智能过滤: 保留 ${afterCount}/${beforeCount} 个角色`, '角色日志');
+                console.log(`[角色日志] 出场次数过滤: ${beforeCount} -> ${afterCount} (过滤掉 ${beforeCount - afterCount} 个)`);
+                toastr.info(`出场次数过滤: 保留 ${afterCount}/${beforeCount} 个角色`, '角色日志');
             }
             
             if (finalCharacters.length === 0) {
-                console.log('[角色日志] 智能过滤后无剩余角色');
-                toastr.warning('所有识别的角色都被过滤掉了', '角色日志');
+                console.log('[角色日志] 出场次数过滤后无剩余角色');
+                toastr.warning('所有识别的角色都被过滤掉了（出场次数不足）', '角色日志');
                 return null;
             }
         }
