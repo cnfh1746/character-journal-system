@@ -1315,7 +1315,7 @@ async function refineCharacterJournal(characterName, lorebookName) {
 
 // 清空所有日志条目
 async function clearAllJournals() {
-    if (!confirm('确定要清空所有角色日志条目吗？此操作不可恢复！')) {
+    if (!confirm('确定要清空所有角色日志和归档条目吗？此操作不可恢复！')) {
         return;
     }
     
@@ -1328,12 +1328,14 @@ async function clearAllJournals() {
             return;
         }
         
-        // 找出所有日志条目
+        // 找出所有日志条目和归档条目
         let deletedCount = 0;
         const entriesToDelete = [];
         
         for (const [key, entry] of Object.entries(bookData.entries)) {
-            if (entry.comment && entry.comment.startsWith(JOURNAL_COMMENT_PREFIX)) {
+            if (entry.comment && 
+                (entry.comment.startsWith(JOURNAL_COMMENT_PREFIX) || 
+                 entry.comment.startsWith(ARCHIVE_COMMENT_PREFIX))) {
                 entriesToDelete.push(key);
             }
         }
@@ -1346,7 +1348,7 @@ async function clearAllJournals() {
         
         if (deletedCount > 0) {
             await saveWorldInfo(lorebookName, bookData, true);
-            toastr.success(`已清空 ${deletedCount} 个日志条目`, '角色日志');
+            toastr.success(`已清空 ${deletedCount} 个条目（包括日志和归档）`, '角色日志');
             await updateStatus();
         } else {
             toastr.info('没有找到日志条目', '角色日志');
