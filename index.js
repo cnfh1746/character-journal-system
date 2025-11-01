@@ -1337,12 +1337,17 @@ async function batchUpdateRange() {
     
     const totalMessages = context.chat.length;
     
-    // 创建输入对话框
+    // 创建输入对话框（支持拖拽和最小化）
     const modalHtml = `
         <div class="character-journal-modal" id="batch_update_modal">
-            <div class="character-journal-modal-content" style="max-width: 500px;">
+            <div class="character-journal-modal-content" style="max-width: 500px;" data-draggable="true">
                 <div class="character-journal-modal-header">
                     <h2>📦 批量更新日志</h2>
+                    <div class="character-journal-modal-controls">
+                        <button class="character-journal-modal-control-btn minimize" id="minimize_batch_modal" title="最小化">
+                            <span>−</span>
+                        </button>
+                    </div>
                 </div>
                 <div class="character-journal-modal-body">
                     <div class="character-journal-info" style="margin-bottom: 15px;">
@@ -1443,9 +1448,100 @@ async function batchUpdateRange() {
             $(this).remove();
         }
     });
+    
+    // 初始化拖拽和最小化功能
+    initModalDragAndMinimize('#batch_update_modal');
 }
 
-// 执行批量更新
+// 通用的弹窗拖拽和最小化功能
+function initModalDragAndMinimize(modalSelector) {
+    const modal = $(modalSelector);
+    const modalContent = modal.find('.character-journal-modal-content');
+    const modalHeader = modal.find('.character-journal-modal-header');
+    const minimizeBtn = modal.find('#minimize_batch_modal');
+    
+    let isMinimized = false;
+    let isDragging = false;
+    let currentX, currentY, initialX, initialY;
+    let xOffset = 0, yOffset = 0;
+    
+    // 最小化/恢复功能
+    minimizeBtn.on('click', function(e) {
+        e.stopPropagation();
+        
+        if (isMinimized) {
+            // 恢复
+            modalContent.removeClass('minimized');
+            modal.removeClass('minimized');
+            $(this).html('<span>−</span>').attr('title', '最小化');
+            isMinimized = false;
+        } else {
+            // 最小化
+            modalContent.addClass('minimized');
+            modal.addClass('minimized');
+            $(this).html('<span>□</span>').attr('title', '恢复');
+            isMinimized = true;
+        }
+    });
+    
+    // 拖拽功能
+    modalHeader.on('mousedown', function(e) {
+        // 如果点击的是按钮，不触发拖拽
+        if ($(e.target).closest('.character-journal-modal-control-btn').length > 0) {
+            return;
+        }
+        
+        isDragging = true;
+        modalContent.addClass('draggable');
+        
+        // 如果是居中状态，切换到固定定位
+        if (modalContent.css('position') !== 'fixed') {
+            const rect = modalContent[0].getBoundingClientRect();
+            xOffset = rect.left;
+            yOffset = rect.top;
+            modalContent.css({
+                'position': 'fixed',
+                'left': xOffset + 'px',
+                'top': yOffset + 'px',
+                'margin': '0'
+            });
+        } else {
+            xOffset = parseInt(modalContent.css('left')) || 0;
+            yOffset = parseInt(modalContent.css('top')) || 0;
+        }
+        
+        initialX = e.clientX - xOffset;
+        initialY = e.clientY - yOffset;
+    });
+    
+    $(document).on('mousemove', function(e) {
+        if (isDragging) {
+            e.preventDefault();
+            
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            
+            xOffset = currentX;
+            yOffset = currentY;
+            
+            setTranslate(currentX, currentY, modalContent[0]);
+        }
+    });
+    
+    $(document).on('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            modalContent.removeClass('draggable');
+        }
+    });
+    
+    function setTranslate(xPos, yPos, el) {
+        el.style.left = xPos + 'px';
+        el.style.top = yPos + 'px';
+    }
+}
+
+// 执行批量更新（优化版：合并同批次角色，减少API调用）
 async function executeBatchUpdate(startFloor, endFloor) {
     const settings = extension_settings[extensionName];
     const threshold = settings.updateThreshold;
@@ -1497,7 +1593,7 @@ async function executeBatchUpdate(startFloor, endFloor) {
         $('#batch_progress_info').html(info);
     }
     
-    // 为每个批次更新日志
+    // 为每个批次更新日志（优化：合并所有角色，只调用1次API）
     for (let i = 0; i < batches.length; i++) {
         const batch = batches[i];
         const batchInfo = `批次 ${i + 1}/${totalBatches}: 第${batch.start}-${batch.end}楼`;
@@ -1505,59 +1601,47 @@ async function executeBatchUpdate(startFloor, endFloor) {
         console.log(`[角色日志] ${batchInfo}`);
         updateProgress(i, totalBatches, `${batchInfo}<br>正在生成日志...`);
         
-        // 确定本批次需要更新的角色
-        let updateRanges = [];
+        // 🔧 优化：收集本批次需要更新的所有角色
+        const charactersToUpdate = [];
         
         if (characterProgresses.size > 0) {
-            // 有已存在的角色，检查每个角色的进度
+            // 收集需要更新的已有角色
             for (const [charName, progress] of characterProgresses.entries()) {
-                // 如果该角色的进度小于本批次的起始楼层，需要更新
                 if (progress < batch.end) {
                     const charStartFloor = Math.max(progress + 1, batch.start);
                     if (charStartFloor <= batch.end) {
-                        updateRanges.push({
-                            characters: [charName],
-                            startFloor: charStartFloor,
-                            endFloor: batch.end,
-                            isExisting: true
-                        });
+                        charactersToUpdate.push(charName);
                     }
                 }
             }
-            
-            // 在每个批次中识别新角色
-            updateRanges.push({
-                characters: null, // AI自动识别
-                startFloor: batch.start,
-                endFloor: batch.end,
-                isExisting: false,
-                existingCharacters: Array.from(characterProgresses.keys())
-            });
-        } else {
-            // 没有任何角色，从头识别
-            updateRanges.push({
-                characters: null,
-                startFloor: batch.start,
-                endFloor: batch.end,
-                isExisting: false
-            });
         }
         
-        // 生成日志
-        for (const range of updateRanges) {
-            const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
-            
-            if (!journals || journals.size === 0) {
-                continue;
-            }
-            
+        // 🔧 优化：一次性为所有角色生成日志（包括识别新角色）
+        const rangeInfo = {
+            characters: charactersToUpdate.length > 0 ? charactersToUpdate : null,
+            startFloor: batch.start,
+            endFloor: batch.end,
+            isExisting: charactersToUpdate.length > 0,
+            existingCharacters: Array.from(characterProgresses.keys())
+        };
+        
+        console.log(`[角色日志] 本批次处理角色:`, charactersToUpdate.length > 0 ? charactersToUpdate.join(', ') : '自动识别');
+        
+        // 一次API调用生成所有角色的日志
+        const journals = await generateCharacterJournals(rangeInfo.startFloor, rangeInfo.endFloor, rangeInfo);
+        
+        if (journals && journals.size > 0) {
             // 更新每个角色的日志
             for (const [charName, journalContent] of journals.entries()) {
-                await updateCharacterJournal(charName, journalContent, range.startFloor, range.endFloor);
+                await updateCharacterJournal(charName, journalContent, rangeInfo.startFloor, rangeInfo.endFloor);
                 
                 // 更新进度映射
-                characterProgresses.set(charName, range.endFloor);
+                characterProgresses.set(charName, rangeInfo.endFloor);
             }
+            
+            console.log(`[角色日志] 本批次成功更新 ${journals.size} 个角色`);
+        } else {
+            console.log('[角色日志] 本批次未生成任何日志');
         }
         
         completedBatches++;

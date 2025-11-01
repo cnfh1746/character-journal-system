@@ -191,7 +191,7 @@
     background-color: #c0392b;
 }
 
-/* Modal styles */
+/* Modal styles - 支持拖拽和最小化 */
 .character-journal-modal {
     position: fixed;
     top: 0;
@@ -204,6 +204,15 @@
     align-items: center;
     z-index: 10000;
     animation: fadeIn 0.3s;
+}
+
+.character-journal-modal.minimized {
+    background-color: transparent;
+    pointer-events: none;
+}
+
+.character-journal-modal.minimized .character-journal-modal-content {
+    pointer-events: auto;
 }
 
 @keyframes fadeIn {
@@ -225,6 +234,21 @@
     flex-direction: column;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
     animation: slideIn 0.3s;
+    position: relative;
+}
+
+.character-journal-modal-content.draggable {
+    cursor: move;
+}
+
+.character-journal-modal-content.minimized {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    max-width: 320px;
+    width: auto;
+    max-height: none;
+    animation: minimizeIn 0.3s;
 }
 
 @keyframes slideIn {
@@ -238,9 +262,24 @@
     }
 }
 
+@keyframes minimizeIn {
+    from {
+        transform: scale(0.8);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
 .character-journal-modal-header {
     padding: 20px;
     border-bottom: 1px solid #cccccc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
 }
 
 .character-journal-modal-header h2 {
@@ -248,6 +287,57 @@
     color: #212121;
     font-size: 20px;
     font-weight: 700;
+    flex: 1;
+}
+
+.character-journal-modal-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.character-journal-modal-control-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: #555555;
+    transition: all 0.2s;
+}
+
+.character-journal-modal-control-btn:hover {
+    background-color: rgba(0, 0, 0, 0.2);
+    color: #212121;
+}
+
+.character-journal-modal-control-btn.minimize:hover {
+    background-color: #f39c12;
+    color: white;
+}
+
+.character-journal-modal-control-btn.close:hover {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.character-journal-modal-content.minimized .character-journal-modal-body,
+.character-journal-modal-content.minimized .character-journal-modal-footer {
+    display: none;
+}
+
+.character-journal-modal-content.minimized .character-journal-modal-header {
+    padding: 12px 15px;
+    border-bottom: none;
+}
+
+.character-journal-modal-content.minimized .character-journal-modal-header h2 {
+    font-size: 14px;
 }
 
 .character-journal-modal-body {
