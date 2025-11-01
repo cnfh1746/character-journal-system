@@ -1223,87 +1223,53 @@ async function refineCharacterJournal(characterName, lorebookName) {
             return false;
         }
         
-        // 提取所有日志段落（按分隔符拆分）
+        // 提取内容
         const content = journalEntry.content;
-        const sections = content.split(/---\n\n/).filter(s => s.trim());
         
-        if (sections.length <= settings.keepRecent) {
-            toastr.info(`${characterName}的日志条目数不足，无需精炼`, '角色日志');
+        // 提取头部（角色名的第一人称日志记录：）
+        const headerMatch = content.match(/^(.+?的第一人称日志记录：)/);
+        const header = headerMatch ? headerMatch[1] : `${characterName}的第一人称日志记录：`;
+        
+        // 移除头部，获取所有日志内容（包括可能已存在的精炼摘要）
+        let contentWithoutHeader = content.replace(/^.+?的第一人称日志记录：\s*/, '');
+        
+        // 移除进度封印
+        contentWithoutHeader = contentWithoutHeader.replace(PROGRESS_SEAL_REGEX, '').trim();
+        
+        // 检查是否为空或内容太少
+        if (!contentWithoutHeader || contentWithoutHeader.length < 100) {
+            toastr.info(`${characterName}的日志内容太少，无需精炼`, '角色日志');
             return false;
         }
         
-        // 保留最近的N条日志
-        const recentSections = sections.slice(-settings.keepRecent);
-        
-        // 需要归档的旧日志
-        const oldSections = sections.slice(0, -settings.keepRecent);
-        const oldContent = oldSections.join('\n---\n\n');
-        
-        // 调用AI精炼旧日志
+        // 调用AI精炼所有内容
         const refineMessages = [
             { role: 'system', content: settings.refinePrompt },
-            { role: 'user', content: `角色名: ${characterName}\n\n需要精炼的日志:\n${oldContent}` }
+            { role: 'user', content: `角色名: ${characterName}\n\n需要精炼的日志:\n${contentWithoutHeader}` }
         ];
         
-        console.log(`[角色日志] 精炼${characterName}的旧日志，归档${oldSections.length}条，保留${recentSections.length}条`);
-        const refinedArchive = await callAI(refineMessages);
+        console.log(`[角色日志] 精炼${characterName}的日志，内容长度: ${contentWithoutHeader.length}`);
+        toastr.info(`正在精炼${characterName}的日志...`, '角色日志');
         
-        if (!refinedArchive) {
+        const refinedSummary = await callAI(refineMessages);
+        
+        if (!refinedSummary) {
             toastr.error(`精炼${characterName}的日志失败`, '角色日志');
             return false;
         }
         
-        // 创建归档条目
-        const archiveKey = Date.now().toString() + '-archive-' + characterName;
-        const archiveComment = `${ARCHIVE_COMMENT_PREFIX}${characterName}`;
+        // 获取当前进度（从原内容中提取）
+        const progressMatch = content.match(PROGRESS_SEAL_REGEX);
+        const currentProgress = progressMatch ? progressMatch[1] : '0';
         
-        const archiveEntry = {
-            uid: archiveKey,
-            key: [`${characterName}档案`, `${characterName}过往`],
-            keysecondary: [],
-            comment: archiveComment,
-            content: `${characterName}的精炼档案（归档）:\n\n${refinedArchive}`,
-            constant: false,
-            selective: true,
-            selectiveLogic: 0,
-            addMemo: false,
-            order: parseInt(settings.entryOrder) - 10 || 80,
-            position: parseInt(settings.insertionPosition) || 2,
-            disable: false,
-            excludeRecursion: true,
-            preventRecursion: true,
-            delayUntilRecursion: false,
-            probability: 100,
-            useProbability: true,
-            depth: parseInt(settings.depth) || 4,
-            group: '',
-            groupOverride: false,
-            groupWeight: 100,
-            scanDepth: null,
-            caseSensitive: false,
-            matchWholeWords: false,
-            useGroupScoring: false,
-            automationId: '',
-            role: 0,
-            vectorized: false,
-            sticky: 0,
-            cooldown: 0,
-            delay: 0
-        };
-        
-        bookData.entries[archiveKey] = archiveEntry;
-        
-        // 更新原日志条目，只保留最近的条目
-        const headerMatch = content.match(/^(.+?的第一人称日志记录：)/);
-        const header = headerMatch ? headerMatch[1] : `${characterName}的第一人称日志记录：`;
-        
-        journalEntry.content = header + '\n\n' + recentSections.join('\n---\n\n');
+        // 用精炼摘要覆盖原内容
+        journalEntry.content = `${header}\n\n【精炼摘要】\n${refinedSummary}\n\n【已更新至第 ${currentProgress} 楼】`;
         
         // 保存世界书
         await saveWorldInfo(lorebookName, bookData, true);
         
         console.log(`[角色日志] ${characterName}的日志精炼完成`);
-        toastr.success(`${characterName}的日志已精炼，归档了${oldSections.length}条旧日志`, '角色日志');
+        toastr.success(`${characterName}的日志已精炼为摘要`, '角色日志');
         
         return true;
     } catch (error) {
@@ -1359,6 +1325,253 @@ async function clearAllJournals() {
     }
 }
 
+// 批量更新指定范围
+async function batchUpdateRange() {
+    const context = getContext();
+    const settings = extension_settings[extensionName];
+    
+    if (!context.chat || context.chat.length === 0) {
+        toastr.warning('当前没有对话', '角色日志');
+        return;
+    }
+    
+    const totalMessages = context.chat.length;
+    
+    // 创建输入对话框
+    const modalHtml = `
+        <div class="character-journal-modal" id="batch_update_modal">
+            <div class="character-journal-modal-content" style="max-width: 500px;">
+                <div class="character-journal-modal-header">
+                    <h2>📦 批量更新日志</h2>
+                </div>
+                <div class="character-journal-modal-body">
+                    <div class="character-journal-info" style="margin-bottom: 15px;">
+                        <strong>当前对话总长度：</strong> ${totalMessages} 楼<br>
+                        <strong>更新阈值：</strong> ${settings.updateThreshold} 楼/次
+                    </div>
+                    
+                    <div class="character-journal-field">
+                        <label for="batch_start_floor">起始楼层：</label>
+                        <input type="number" id="batch_start_floor" min="1" max="${totalMessages}" value="1" style="width: 100%;">
+                    </div>
+                    
+                    <div class="character-journal-field">
+                        <label for="batch_end_floor">结束楼层：</label>
+                        <input type="number" id="batch_end_floor" min="1" max="${totalMessages}" value="${totalMessages}" style="width: 100%;">
+                    </div>
+                    
+                    <div class="character-journal-info" style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px;">
+                        <strong>⚠️ 注意：</strong><br>
+                        • 程序会按阈值自动分批更新<br>
+                        • 例如：2-250楼，阈值20，会分成多次调用API<br>
+                        • 已有进度的角色会自动跳过已更新部分
+                    </div>
+                    
+                    <div id="batch_progress_display" style="margin-top: 15px; display: none;">
+                        <div style="font-weight: bold; margin-bottom: 8px;">更新进度：</div>
+                        <div id="batch_progress_bar" style="width: 100%; height: 24px; background: #e0e0e0; border-radius: 12px; overflow: hidden; position: relative;">
+                            <div id="batch_progress_fill" style="height: 100%; background: linear-gradient(90deg, #4a90e2, #357abd); transition: width 0.3s; width: 0%;"></div>
+                            <div id="batch_progress_text" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; font-weight: bold; color: #fff;">0%</div>
+                        </div>
+                        <div id="batch_progress_info" style="margin-top: 8px; font-size: 13px; color: #666;"></div>
+                    </div>
+                </div>
+                <div class="character-journal-modal-footer">
+                    <button class="character-journal-btn" id="cancel_batch_update">取消</button>
+                    <button class="character-journal-btn success" id="start_batch_update">开始更新</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    $('body').append(modalHtml);
+    
+    let isUpdating = false;
+    
+    // 开始更新按钮
+    $('#start_batch_update').on('click', async function() {
+        if (isUpdating) return;
+        
+        const startFloor = parseInt($('#batch_start_floor').val());
+        const endFloor = parseInt($('#batch_end_floor').val());
+        
+        if (isNaN(startFloor) || isNaN(endFloor)) {
+            toastr.error('请输入有效的楼层数字', '角色日志');
+            return;
+        }
+        
+        if (startFloor < 1 || endFloor > totalMessages) {
+            toastr.error(`楼层范围必须在 1-${totalMessages} 之间`, '角色日志');
+            return;
+        }
+        
+        if (startFloor > endFloor) {
+            toastr.error('起始楼层不能大于结束楼层', '角色日志');
+            return;
+        }
+        
+        isUpdating = true;
+        $('#start_batch_update').prop('disabled', true).text('更新中...');
+        $('#cancel_batch_update').prop('disabled', true);
+        $('#batch_progress_display').show();
+        
+        try {
+            await executeBatchUpdate(startFloor, endFloor);
+            toastr.success('批量更新完成！', '角色日志');
+            $('#batch_update_modal').remove();
+            await updateStatus();
+        } catch (error) {
+            console.error('[角色日志] 批量更新失败:', error);
+            toastr.error(`批量更新失败: ${error.message}`, '角色日志');
+            $('#start_batch_update').prop('disabled', false).text('开始更新');
+            $('#cancel_batch_update').prop('disabled', false);
+        } finally {
+            isUpdating = false;
+        }
+    });
+    
+    // 取消按钮
+    $('#cancel_batch_update').on('click', function() {
+        if (!isUpdating) {
+            $('#batch_update_modal').remove();
+        }
+    });
+    
+    // 点击背景关闭（仅在未更新时）
+    $('#batch_update_modal').on('click', function(e) {
+        if (e.target.id === 'batch_update_modal' && !isUpdating) {
+            $(this).remove();
+        }
+    });
+}
+
+// 执行批量更新
+async function executeBatchUpdate(startFloor, endFloor) {
+    const settings = extension_settings[extensionName];
+    const threshold = settings.updateThreshold;
+    const lorebookName = await getTargetLorebookName();
+    
+    // 读取所有角色的当前进度
+    const characterProgresses = new Map();
+    try {
+        const bookData = await loadWorldInfo(lorebookName);
+        if (bookData && bookData.entries) {
+            const journalEntries = Object.values(bookData.entries).filter(
+                e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
+            );
+            
+            for (const entry of journalEntries) {
+                const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
+                const match = entry.content.match(PROGRESS_SEAL_REGEX);
+                const progress = match ? parseInt(match[1], 10) : 0;
+                characterProgresses.set(charName, progress);
+            }
+        }
+    } catch (error) {
+        console.log('[角色日志] 无法读取现有进度，将从头开始');
+    }
+    
+    // 计算需要更新的批次
+    const batches = [];
+    let currentFloor = startFloor;
+    
+    while (currentFloor <= endFloor) {
+        const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
+        batches.push({
+            start: currentFloor,
+            end: batchEnd
+        });
+        currentFloor = batchEnd + 1;
+    }
+    
+    console.log(`[角色日志] 批量更新: ${startFloor}-${endFloor}楼, 共${batches.length}批次`);
+    
+    let completedBatches = 0;
+    const totalBatches = batches.length;
+    
+    // 更新进度显示
+    function updateProgress(current, total, info) {
+        const percentage = Math.round((current / total) * 100);
+        $('#batch_progress_fill').css('width', `${percentage}%`);
+        $('#batch_progress_text').text(`${percentage}%`);
+        $('#batch_progress_info').html(info);
+    }
+    
+    // 为每个批次更新日志
+    for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        const batchInfo = `批次 ${i + 1}/${totalBatches}: 第${batch.start}-${batch.end}楼`;
+        
+        console.log(`[角色日志] ${batchInfo}`);
+        updateProgress(i, totalBatches, `${batchInfo}<br>正在生成日志...`);
+        
+        // 确定本批次需要更新的角色
+        let updateRanges = [];
+        
+        if (characterProgresses.size > 0) {
+            // 有已存在的角色，检查每个角色的进度
+            for (const [charName, progress] of characterProgresses.entries()) {
+                // 如果该角色的进度小于本批次的起始楼层，需要更新
+                if (progress < batch.end) {
+                    const charStartFloor = Math.max(progress + 1, batch.start);
+                    if (charStartFloor <= batch.end) {
+                        updateRanges.push({
+                            characters: [charName],
+                            startFloor: charStartFloor,
+                            endFloor: batch.end,
+                            isExisting: true
+                        });
+                    }
+                }
+            }
+            
+            // 在每个批次中识别新角色
+            updateRanges.push({
+                characters: null, // AI自动识别
+                startFloor: batch.start,
+                endFloor: batch.end,
+                isExisting: false,
+                existingCharacters: Array.from(characterProgresses.keys())
+            });
+        } else {
+            // 没有任何角色，从头识别
+            updateRanges.push({
+                characters: null,
+                startFloor: batch.start,
+                endFloor: batch.end,
+                isExisting: false
+            });
+        }
+        
+        // 生成日志
+        for (const range of updateRanges) {
+            const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
+            
+            if (!journals || journals.size === 0) {
+                continue;
+            }
+            
+            // 更新每个角色的日志
+            for (const [charName, journalContent] of journals.entries()) {
+                await updateCharacterJournal(charName, journalContent, range.startFloor, range.endFloor);
+                
+                // 更新进度映射
+                characterProgresses.set(charName, range.endFloor);
+            }
+        }
+        
+        completedBatches++;
+        updateProgress(completedBatches, totalBatches, `✓ 已完成 ${completedBatches}/${totalBatches} 批次`);
+        
+        // 短暂延迟避免API限流
+        if (i < batches.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+    
+    console.log('[角色日志] 批量更新全部完成');
+}
+
 // 设置UI事件监听
 function setupUIHandlers() {
     // 保存设置按钮
@@ -1376,6 +1589,11 @@ function setupUIHandlers() {
     // 手动更新按钮
     $('#cj_manual_update').on('click', async function() {
         await executeJournalUpdate();
+    });
+    
+    // 批量更新按钮
+    $('#cj_batch_update').on('click', async function() {
+        await batchUpdateRange();
     });
     
     // 手动精炼按钮
