@@ -1733,6 +1733,76 @@ function initModalDragAndMinimize(modalSelector) {
     }
 }
 
+// 手动生成指定角色的日志
+async function generateForSpecificCharacter() {
+    const characterName = $('#cj_manual_character_name').val().trim();
+    const messageCount = parseInt($('#cj_manual_message_count').val());
+    const context = getContext();
+    
+    if (!characterName) {
+        toastr.warning('请输入角色名称', '角色日志');
+        return;
+    }
+    
+    if (!context.chat || context.chat.length === 0) {
+        toastr.warning('当前没有对话', '角色日志');
+        return;
+    }
+    
+    if (isNaN(messageCount) || messageCount < 5 || messageCount > 200) {
+        toastr.error('消息数必须在5-200之间', '角色日志');
+        return;
+    }
+    
+    const totalMessages = context.chat.length;
+    const endFloor = totalMessages;
+    const startFloor = Math.max(1, endFloor - messageCount + 1);
+    
+    console.log(`[角色日志] 手动生成 ${characterName} 的日志: 读取第${startFloor}-${endFloor}楼`);
+    
+    try {
+        toastr.info(`正在为 ${characterName} 生成日志...`, '角色日志');
+        
+        // 构建rangeInfo，指定角色
+        const rangeInfo = {
+            characters: [characterName],
+            startFloor: startFloor,
+            endFloor: endFloor,
+            isExisting: false
+        };
+        
+        // 调用生成函数
+        const journals = await generateCharacterJournals(startFloor, endFloor, rangeInfo);
+        
+        if (!journals || journals.size === 0) {
+            toastr.warning(`未能为 ${characterName} 生成日志（可能该角色未出场或被过滤）`, '角色日志');
+            return;
+        }
+        
+        // 检查是否成功生成了指定角色的日志
+        if (!journals.has(characterName)) {
+            toastr.warning(`未能为 ${characterName} 生成日志（可能未出场或不符合条件）`, '角色日志');
+            return;
+        }
+        
+        const journalContent = journals.get(characterName);
+        
+        // 更新或创建该角色的日志条目
+        const success = await updateCharacterJournal(characterName, journalContent, startFloor, endFloor);
+        
+        if (success) {
+            toastr.success(`成功为 ${characterName} 生成日志！`, '角色日志');
+            await updateStatus();
+            
+            // 清空输入框
+            $('#cj_manual_character_name').val('');
+        }
+    } catch (error) {
+        console.error('[角色日志] 手动生成失败:', error);
+        toastr.error(`生成失败: ${error.message}`, '角色日志');
+    }
+}
+
 // 执行批量更新（修复版：为已有角色续写，同时识别新角色）
 async function executeBatchUpdate(startFloor, endFloor) {
     const settings = extension_settings[extensionName];
@@ -2052,7 +2122,8 @@ jQuery(async () => {
     console.log('[角色日志系统] 新布局处理器已加载');
 });
 
-// 导出saveSettings供新布局处理器调用
+// 导出函数供新布局处理器调用
 window.characterJournal = {
-    saveSettings: saveSettings
+    saveSettings: saveSettings,
+    generateForSpecificCharacter: generateForSpecificCharacter
 };

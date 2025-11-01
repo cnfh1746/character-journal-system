@@ -189,6 +189,33 @@
         });
     }
 
+    // ========== 手动生成指定角色日志 ==========
+    function initManualCharacterGeneration() {
+        $(document).on('click', '#cj_generate_for_character', async function() {
+            const characterName = $('#cj_manual_character_name').val().trim();
+            const messageCount = parseInt($('#cj_manual_message_count').val());
+            
+            if (!characterName) {
+                toastr.warning('请输入角色名称', '角色日志');
+                return;
+            }
+            
+            if (isNaN(messageCount) || messageCount < 5 || messageCount > 200) {
+                toastr.error('消息数必须在5-200之间', '角色日志');
+                return;
+            }
+            
+            // 调用index.js中的函数
+            if (typeof window.characterJournal !== 'undefined' && 
+                typeof window.characterJournal.generateForSpecificCharacter === 'function') {
+                await window.characterJournal.generateForSpecificCharacter();
+            } else {
+                console.error('[角色日志] 找不到generateForSpecificCharacter函数');
+                toastr.error('功能暂不可用，请检查扩展加载状态', '角色日志');
+            }
+        });
+    }
+
     // ========== 初始化所有功能 ==========
     function init() {
         console.log('[CharacterJournal] 初始化新布局处理器');
@@ -199,6 +226,7 @@
             initModalControls();
             initDedicatedWorldbookField();
             initWorldbookSelector();
+            initManualCharacterGeneration();
             
             console.log('[CharacterJournal] 新布局处理器初始化完成');
         });

@@ -324,6 +324,30 @@
                 </div>
 
                 <div class="character-journal-section">
+                    <h3>✍️ 手动指定角色生成</h3>
+                    <div class="character-journal-info" style="background: #e8f5e9; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                        <strong>💡 使用说明：</strong><br>
+                        当AI识别漏掉某个角色时，可以手动输入角色名生成日志。<br>
+                        系统会读取最近N条消息，为该角色生成第一人称日志。
+                    </div>
+                    
+                    <div class="character-journal-field">
+                        <label for="cj_manual_character_name">角色名称：</label>
+                        <input type="text" id="cj_manual_character_name" placeholder="输入要生成日志的角色名" style="margin-bottom: 10px;">
+                    </div>
+
+                    <div class="character-journal-field">
+                        <label for="cj_manual_message_count">读取消息数：</label>
+                        <input type="number" id="cj_manual_message_count" min="5" max="200" value="20" style="margin-bottom: 10px;">
+                        <small>从最新消息往前读取的条数（默认20条）</small>
+                    </div>
+
+                    <div class="character-journal-button-group">
+                        <button class="character-journal-btn success" id="cj_generate_for_character">🚀 生成该角色日志</button>
+                    </div>
+                </div>
+
+                <div class="character-journal-section">
                     <h3>📊 详细状态</h3>
                     <div class="character-journal-status" id="cj_status_display_modal">
                         等待初始化...
