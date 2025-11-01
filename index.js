@@ -452,7 +452,7 @@ async function getCharacterWorldInfo(characterName) {
 }
 
 // 生成角色日志
-async function generateCharacterJournals(startFloor, endFloor, characters) {
+async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
     const settings = extension_settings[extensionName];
     const messages = getUnloggedMessages(startFloor, endFloor, null);
     
@@ -468,7 +468,15 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
     // 根据检测模式获取角色列表
     let finalCharacters;
     
-    if (settings.detectionMode === "manual" && settings.manualCharacters) {
+    // 如果有明确指定的角色列表，直接使用
+    if (rangeInfo && rangeInfo.characters && rangeInfo.characters.length > 0) {
+        finalCharacters = rangeInfo.characters.map(name => ({
+            name: name,
+            count: 0,
+            isUser: false
+        }));
+        console.log('[角色日志] 使用指定的角色列表:', rangeInfo.characters);
+    } else if (settings.detectionMode === "manual" && settings.manualCharacters) {
         // 手动模式：使用用户输入的角色列表
         const manualNames = settings.manualCharacters
             .split(',')
@@ -491,7 +499,7 @@ async function generateCharacterJournals(startFloor, endFloor, characters) {
         // 自动模式：使用AI识别角色
         toastr.info('AI正在识别角色...', '角色日志');
         // 如果有传入已存在的角色列表，传递给AI识别函数用于排除
-        const existingChars = characters?.existingCharacters || [];
+        const existingChars = rangeInfo?.existingCharacters || [];
         finalCharacters = await detectCharactersByAI(messages, existingChars);
         
         if (!finalCharacters || finalCharacters.length === 0) {
