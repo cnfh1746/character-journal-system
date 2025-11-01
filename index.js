@@ -2042,4 +2042,17 @@ jQuery(async () => {
     });
     
     console.log('[角色日志系统] 扩展已加载');
+    
+    // 加载新布局处理器
+    const layoutHandlerScript = document.createElement('script');
+    layoutHandlerScript.src = `${extensionFolderPath}new-layout-handler.js`;
+    layoutHandlerScript.type = 'text/javascript';
+    document.head.appendChild(layoutHandlerScript);
+    
+    console.log('[角色日志系统] 新布局处理器已加载');
 });
+
+// 导出saveSettings供新布局处理器调用
+window.characterJournal = {
+    saveSettings: saveSettings
+};

@@ -419,3 +419,74 @@
     color: #555555;
     white-space: nowrap;
 }
+
+/* ========== 标签页样式 ========== */
+.character-journal-tabs {
+    display: flex;
+    background-color: #e8e8e8;
+    border-bottom: 2px solid #cccccc;
+    padding: 0;
+    margin: 0;
+    overflow-x: auto;
+}
+
+.character-journal-tab {
+    flex: 1;
+    min-width: 120px;
+    padding: 12px 20px;
+    background-color: #e8e8e8;
+    border: none;
+    border-right: 1px solid #d0d0d0;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    color: #555555;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.character-journal-tab:last-child {
+    border-right: none;
+}
+
+.character-journal-tab:hover {
+    background-color: #d8d8d8;
+    color: #212121;
+}
+
+.character-journal-tab.active {
+    background-color: #4a90e2;
+    color: white;
+    border-bottom: 2px solid #357abd;
+}
+
+.character-journal-tab-content {
+    display: none;
+    animation: fadeInTab 0.3s;
+}
+
+.character-journal-tab-content.active {
+    display: block;
+}
+
+@keyframes fadeInTab {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 主面板primary按钮 */
+.character-journal-btn.primary {
+    background-color: #4a90e2;
+    font-size: 15px;
+    padding: 10px 24px;
+}
+
+.character-journal-btn.primary:hover {
+    background-color: #357abd;
+}
