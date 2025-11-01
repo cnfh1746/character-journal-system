@@ -29,18 +29,24 @@ const defaultSettings = {
     autoUpdate: false,
     useWorldInfo: true,
     
+    // 智能过滤设置
+    filterEnabled: true,
+    filterKeywords: "男,男性,他,少年,小伙,男主,男角色",
+    minAppearances: 5,
+    filterNoWorldinfo: false,
+    
     updateThreshold: 20,
-    journalPrompt: `你是记忆记录助手。请为**在本轮对话中出场的角色**写第一人称日志。
+    journalPrompt: `你是记忆记录助手。请为**在本轮对话中实际出场的女性角色**写第一人称日志。
 
-重要规则：
-1. 只为实际出场并有对话/行动的角色写日志
-2. 未出场的角色不要输出任何内容（直接跳过）
-3. 使用第一人称（我、我的）
-4. 每个事件独立成条，格式：时间标记 + 事件 + 感受/想法
-5. 时间标记可灵活使用：具体时间（早上/下午）、日期、节日、事件节点等
-6. 每条日志控制在50-100字左右
+🔴 严格规则（必须遵守）：
+1. **只为实际出场的角色写日志** - 有明确对话/行动描写的角色
+2. **绝对禁止为男性角色生成日志** - 即使他们出场也不要写
+3. **未出场的角色直接跳过** - 不要输出任何内容，包括"未出场"等占位符
+4. **不要输出剧情描述** - 必须是第一人称日记形式（我、我的），不是第三人称叙述
+5. 每个事件独立成条，格式：**时间标记 - 事件 + 内心感受**
+6. 每条日志50-100字左右
 
-输出格式示例：
+✅ 正确示例：
 ===角色:炽霞===
 • 早上巡逻时 - 遇到了杨，昨晚的事让我有些不知所措，但还是强装镇定。走路时身体还有些不适，希望他没注意到。
 • 巡逻途中 - 听到呼救声，立刻切换到工作模式。杨跟了上来，虽然有些意外，但多个人手总是好的。
@@ -48,11 +54,16 @@ const defaultSettings = {
 • 上午 - 继续照顾杨和炽霞，看着两人的互动觉得有些好笑。年轻人的感情总是这么青涩可爱。
 ===END===
 
-禁止事项：
-❌ 不要为未出场的角色输出任何内容
-❌ 不要输出"未出场"、"无"等占位符
-❌ 禁止生成男性的日志
-❌ 不要为非角色实体生成日志（世界名、地点、组织等）`,
+❌ 错误示例（不要这样写）：
+• "长离与漂泊者前往虹镇" - 这是剧情描述，不是日志
+• "早上 - 他们一起出发了" - 这是第三人称，不是第一人称
+• 为男性角色"杨"、"漂泊者"等生成日志 - 禁止
+
+🚫 绝对禁止：
+❌ 为男性角色生成日志（无论是否出场）
+❌ 为未出场角色输出任何内容
+❌ 输出剧情描述而不是第一人称日记
+❌ 为非角色实体生成日志（地点、组织等）`,
     
     autoRefine: false,
     refineThreshold: 5000,
@@ -333,6 +344,82 @@ function parseCharacterJournals(response, allowedCharacters = null) {
     return journals;
 }
 
+// 智能过滤角色
+async function filterCharacters(characters, messages, characterInfoMap) {
+    const settings = extension_settings[extensionName];
+    
+    // 如果未启用过滤，直接返回
+    if (!settings.filterEnabled) {
+        console.log('[角色日志] 智能过滤已禁用');
+        return characters;
+    }
+    
+    console.log(`[角色日志] 开始智能过滤，待过滤角色数: ${characters.length}`);
+    
+    const filtered = [];
+    const context = getContext();
+    const chat = context.chat;
+    
+    // 合并所有对话文本用于统计出场次数
+    const fullChatText = messages.map(m => m.content).join('\n');
+    
+    for (const char of characters) {
+        const charName = char.name || char;
+        let shouldFilter = false;
+        let filterReason = '';
+        
+        // 1. 检查出场次数
+        if (settings.minAppearances > 0) {
+            // 统计名字在对话中出现的次数
+            const regex = new RegExp(charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+            const matches = fullChatText.match(regex);
+            const appearanceCount = matches ? matches.length : 0;
+            
+            if (appearanceCount < settings.minAppearances) {
+                shouldFilter = true;
+                filterReason = `出场次数不足(${appearanceCount}次 < ${settings.minAppearances}次)`;
+            }
+        }
+        
+        // 2. 检查世界书资料
+        if (!shouldFilter && characterInfoMap) {
+            const worldInfo = characterInfoMap.get(charName);
+            
+            // 检查是否有世界书资料
+            if (settings.filterNoWorldinfo && (!worldInfo || worldInfo.trim().length === 0)) {
+                shouldFilter = true;
+                filterReason = '世界书中无资料';
+            }
+            
+            // 检查性别关键词
+            if (!shouldFilter && worldInfo && settings.filterKeywords) {
+                const keywords = settings.filterKeywords
+                    .split(',')
+                    .map(k => k.trim())
+                    .filter(Boolean);
+                
+                for (const keyword of keywords) {
+                    if (worldInfo.includes(keyword)) {
+                        shouldFilter = true;
+                        filterReason = `世界书资料包含过滤关键词"${keyword}"`;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (shouldFilter) {
+            console.log(`[角色日志] ❌ 过滤角色: ${charName} - ${filterReason}`);
+        } else {
+            console.log(`[角色日志] ✓ 保留角色: ${charName}`);
+            filtered.push(char);
+        }
+    }
+    
+    console.log(`[角色日志] 过滤完成: ${characters.length} -> ${filtered.length}`);
+    return filtered;
+}
+
 // AI识别角色
 async function detectCharactersByAI(messages, existingCharacters = []) {
     const context = getContext();
@@ -358,15 +445,19 @@ async function detectCharactersByAI(messages, existingCharacters = []) {
         console.log('[角色日志] 排除已有角色:', existingCharacters);
     }
     
-    const detectPrompt = `你是角色识别助手。请分析以下小说式剧情文本，识别出所有出场的角色名字。
+    const detectPrompt = `你是角色识别助手。请分析以下对话记录，识别出**重要的女性角色名字**。
 
-要求：
-1. 只返回角色的名字，用逗号分隔
-2. 不要包含这些名字：${excludeList.join('、')}
-3. 不要包含地点、物品、组织等非角色名
-4. 如果没有识别到角色，返回：无
+🔴 严格要求：
+1. **只识别女性角色** - 绝对不要识别男性角色
+2. **只识别重要角色** - 有实质性对话/行动的主要角色，不要识别：
+   - 一笔带过的配角（如"阿布"、"黑咩"、"白咩"等）
+   - 只是被提到但未实际出场的角色
+   - 非人类角色（动物、怪物等）
+3. **不要包含这些名字**：${excludeList.join('、')}
+4. **不要识别**：地点名、物品名、组织名、职位名
+5. 如果没有符合条件的角色，返回：无
 
-文本内容：
+对话记录：
 ${formattedHistory}
 
 请直接输出角色名列表（格式：角色1, 角色2, 角色3）：`;
@@ -514,6 +605,34 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
             console.log('[角色日志] AI未识别到新角色（可能都已存在）');
             toastr.warning('AI未能识别到新角色', '角色日志');
             return null;
+        }
+        
+        // 🔧 应用智能过滤（在AI识别之后）
+        if (settings.filterEnabled && settings.useWorldInfo) {
+            toastr.info('正在应用智能过滤...', '角色日志');
+            
+            // 先获取所有角色的世界书信息用于过滤
+            const characterInfoMap = new Map();
+            for (const char of finalCharacters) {
+                const info = await getCharacterWorldInfo(char.name);
+                characterInfoMap.set(char.name, info || '');
+            }
+            
+            // 应用过滤
+            const beforeCount = finalCharacters.length;
+            finalCharacters = await filterCharacters(finalCharacters, messages, characterInfoMap);
+            const afterCount = finalCharacters.length;
+            
+            if (afterCount < beforeCount) {
+                console.log(`[角色日志] 智能过滤: ${beforeCount} -> ${afterCount} (过滤掉 ${beforeCount - afterCount} 个)`);
+                toastr.info(`智能过滤: 保留 ${afterCount}/${beforeCount} 个角色`, '角色日志');
+            }
+            
+            if (finalCharacters.length === 0) {
+                console.log('[角色日志] 智能过滤后无剩余角色');
+                toastr.warning('所有识别的角色都被过滤掉了', '角色日志');
+                return null;
+            }
         }
     }
     
@@ -924,6 +1043,12 @@ function loadSettings() {
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
     $('#cj_use_worldinfo').prop('checked', settings.useWorldInfo);
     
+    // 加载智能过滤设置
+    $('#cj_filter_enabled').prop('checked', settings.filterEnabled !== undefined ? settings.filterEnabled : true);
+    $('#cj_filter_keywords').val(settings.filterKeywords || '男,男性,他,少年,小伙,男主,男角色');
+    $('#cj_min_appearances').val(settings.minAppearances !== undefined ? settings.minAppearances : 5);
+    $('#cj_filter_no_worldinfo').prop('checked', settings.filterNoWorldinfo || false);
+    
     // 根据target值显示/隐藏专用世界书字段
     if (settings.target === 'dedicated') {
         $('#cj_dedicated_worldbook_field').show();
@@ -964,6 +1089,12 @@ function saveSettings() {
     settings.excludeNames = $('#cj_exclude_names').val();
     settings.excludeUser = $('#cj_exclude_user').prop('checked');
     settings.useWorldInfo = $('#cj_use_worldinfo').prop('checked');
+    
+    // 保存智能过滤设置
+    settings.filterEnabled = $('#cj_filter_enabled').prop('checked');
+    settings.filterKeywords = $('#cj_filter_keywords').val();
+    settings.minAppearances = parseInt($('#cj_min_appearances').val());
+    settings.filterNoWorldinfo = $('#cj_filter_no_worldinfo').prop('checked');
     
     settings.updateThreshold = parseInt($('#cj_update_threshold').val());
     settings.journalPrompt = $('#cj_journal_prompt').val();
