@@ -306,7 +306,7 @@ async function callAI(messages) {
 }
 
 // 解析角色日志
-function parseCharacterJournals(response) {
+function parseCharacterJournals(response, allowedCharacters = null) {
     const journals = new Map();
     
     // 匹配格式: ===角色:Name===\n内容\n
@@ -316,6 +316,14 @@ function parseCharacterJournals(response) {
     while ((match = regex.exec(response)) !== null) {
         const characterName = match[1].trim();
         const journalContent = match[2].trim();
+        
+        // 白名单过滤：如果指定了允许的角色列表，只处理列表中的角色
+        if (allowedCharacters && allowedCharacters.length > 0) {
+            if (!allowedCharacters.includes(characterName)) {
+                console.log(`[角色日志] 跳过未授权的角色: ${characterName}`);
+                continue;
+            }
+        }
         
         if (journalContent && !journalContent.includes('【本轮未出场】')) {
             journals.set(characterName, journalContent);
@@ -572,8 +580,11 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
     console.log('[角色日志] AI响应长度:', response.length, '字符');
     console.log('[角色日志] AI响应内容:', response.substring(0, 500) + '...');
     
-    const journals = parseCharacterJournals(response);
+    // 传递允许的角色列表进行白名单过滤
+    const allowedNames = finalCharacters.map(c => c.name);
+    const journals = parseCharacterJournals(response, allowedNames);
     console.log('[角色日志] 解析结果:', Array.from(journals.keys()));
+    console.log('[角色日志] 允许的角色:', allowedNames);
     
     return journals;
 }
