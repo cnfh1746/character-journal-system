@@ -13,8 +13,8 @@ const extensionName = "character-journal-system";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
 
 // 常量定义
-const JOURNAL_COMMENT_PREFIX = "【Character Journal】";
-const ARCHIVE_COMMENT_PREFIX = "【Character Archive】";
+const JOURNAL_COMMENT_PREFIX = "【日志】";
+const ARCHIVE_COMMENT_PREFIX = "【归档】";
 const PROGRESS_SEAL_REGEX = /【已更新至第 (\d+) 楼】$/;
 
 // 默认设置
@@ -1617,10 +1617,8 @@ async function executeBatchUpdate(startFloor, endFloor) {
         const newCharacters = await detectCharactersByAI(messages, existingCharacters);
         console.log(`[角色日志] AI识别到 ${newCharacters.length} 个新角色:`, newCharacters.map(c => c.name).join(', ') || '无');
         
-        // 🔧 步骤2：合并已有角色 + 新识别的角色
-        const allCharactersForBatch = [...existingCharacters];
+        // 🔧 步骤2：只为新识别的角色生成日志（不包含已有角色，让AI根据提示词自行判断）
         const newCharNames = newCharacters.map(c => c.name);
-        allCharactersForBatch.push(...newCharNames);
         
         // 更新已有角色的进度映射（添加新角色）
         for (const newCharName of newCharNames) {
@@ -1629,19 +1627,19 @@ async function executeBatchUpdate(startFloor, endFloor) {
             }
         }
         
-        if (allCharactersForBatch.length === 0) {
-            console.log('[角色日志] 本批次没有角色需要更新');
+        if (newCharNames.length === 0) {
+            console.log('[角色日志] 本批次没有新角色需要生成日志');
             completedBatches++;
             updateProgress(completedBatches, totalBatches, `✓ 已完成 ${completedBatches}/${totalBatches} 批次`);
             continue;
         }
         
-        console.log(`[角色日志] 步骤2: 为 ${allCharactersForBatch.length} 个角色生成日志:`, allCharactersForBatch.join(', '));
-        updateProgress(i, totalBatches, `${batchInfo}<br>步骤2/2: 生成 ${allCharactersForBatch.length} 个角色的日志...`);
+        console.log(`[角色日志] 步骤2: 只为 ${newCharNames.length} 个新识别角色生成日志:`, newCharNames.join(', '));
+        updateProgress(i, totalBatches, `${batchInfo}<br>步骤2/2: 生成 ${newCharNames.length} 个角色的日志...`);
         
-        // 调用AI生成日志（为所有角色一次性生成）
+        // 调用AI生成日志（只为新识别的角色生成，AI会根据提示词判断是否实际出场）
         const rangeInfo = {
-            characters: allCharactersForBatch,
+            characters: newCharNames,
             startFloor: batch.start,
             endFloor: batch.end,
             isExisting: true
