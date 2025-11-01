@@ -466,7 +466,7 @@ ${formattedHistory}
         .map(name => name.trim())
         .filter(name => name && name !== '无' && !excludeList.includes(name));
     
-    console.log('[角色日志] AI识别到的角色:', detectedNames);
+    console.log('[角色日志] AI识别到的角色:', detectedNames.join(', '));
     
     return detectedNames.map(name => ({
         name: name,
@@ -628,7 +628,7 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
             const info = await getCharacterWorldInfo(char.name);
             if (info) {
                 characterInfoMap.set(char.name, info);
-                console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 200) + '...');
+                console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 50) + '...');
             }
         }
         
@@ -787,6 +787,80 @@ async function updateCharacterJournal(characterName, journalContent, startFloor,
     }
 }
 
+// 检查并自动更新
+async function checkAndAutoUpdate() {
+    const settings = extension_settings[extensionName];
+    const context = getContext();
+    
+    if (!context.chat || context.chat.length === 0) {
+        return;
+    }
+    
+    try {
+        const lorebookName = await getTargetLorebookName();
+        
+        // 读取所有角色的进度
+        const characterProgresses = new Map();
+        try {
+            const bookData = await loadWorldInfo(lorebookName);
+            if (bookData && bookData.entries) {
+                const journalEntries = Object.values(bookData.entries).filter(
+                    e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
+                );
+                
+                for (const entry of journalEntries) {
+                    const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
+                    const match = entry.content.match(PROGRESS_SEAL_REGEX);
+                    const progress = match ? parseInt(match[1], 10) : 0;
+                    characterProgresses.set(charName, progress);
+                }
+            }
+        } catch (error) {
+            console.log('[角色日志] 无法读取现有进度');
+            return;
+        }
+        
+        console.log(`[角色日志] 自动检查: 对话总长度 ${context.chat.length} 楼`);
+        console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
+        
+        // 检查是否有角色需要更新
+        let needsUpdate = false;
+        const maxProgress = characterProgresses.size > 0 
+            ? Math.max(...Array.from(characterProgresses.values())) 
+            : 0;
+        
+        // 检查已有角色是否需要更新
+        for (const [charName, progress] of characterProgresses.entries()) {
+            const unloggedCount = context.chat.length - progress;
+            if (unloggedCount >= settings.updateThreshold) {
+                console.log(`[角色日志] 角色 ${charName} 需要更新: 未记录 ${unloggedCount} 楼 >= 阈值 ${settings.updateThreshold}`);
+                needsUpdate = true;
+                break;
+            }
+        }
+        
+        // 检查是否需要识别新角色
+        if (!needsUpdate && maxProgress < context.chat.length) {
+            const newMessagesCount = context.chat.length - maxProgress;
+            if (newMessagesCount >= settings.updateThreshold) {
+                console.log(`[角色日志] 检测到新消息: ${newMessagesCount} 楼 >= 阈值 ${settings.updateThreshold}，将识别新角色`);
+                needsUpdate = true;
+            }
+        }
+        
+        if (needsUpdate) {
+            console.log('[角色日志] 触发自动更新...');
+            toastr.info('达到更新阈值，自动更新角色日志...', '角色日志');
+            await executeJournalUpdate();
+        } else {
+            console.log('[角色日志] 未达到更新阈值，跳过自动更新');
+        }
+        
+    } catch (error) {
+        console.error('[角色日志] 自动检查失败:', error);
+    }
+}
+
 // 执行日志更新
 async function executeJournalUpdate() {
     const settings = extension_settings[extensionName];
@@ -819,6 +893,9 @@ async function executeJournalUpdate() {
         } catch (error) {
             console.log('[角色日志] 无法读取现有进度，将自动识别角色');
         }
+        
+        console.log(`[角色日志] 手动更新: 对话总长度 ${context.chat.length} 楼`);
+        console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
         
         let updateRanges = [];
         
@@ -890,17 +967,24 @@ async function executeJournalUpdate() {
             }
         }
         
+        console.log(`[角色日志] 总共 ${rangeMap.size} 个更新任务`);
+        
         // 执行更新
         let totalSuccessCount = 0;
+        let taskIndex = 0;
         for (const range of rangeMap.values()) {
-            console.log(`[角色日志] 更新范围: ${range.startFloor}-${range.endFloor}楼`, 
-                        range.characters ? `角色: ${range.characters.join(', ')}` : '自动识别角色');
+            taskIndex++;
+            const taskInfo = range.characters 
+                ? `更新 ${range.characters.join(', ')} (${range.startFloor}-${range.endFloor}楼)`
+                : `识别新角色 (${range.startFloor}-${range.endFloor}楼)`;
+            
+            console.log(`[角色日志] 任务 ${taskIndex}/${rangeMap.size}: ${taskInfo}`);
             
             // 传递range对象，其中可能包含existingCharacters信息
             const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
             
             if (!journals || journals.size === 0) {
-                console.log('[角色日志] 该范围未生成任何日志');
+                console.log('[角色日志] 本任务未生成任何日志');
                 continue;
             }
             
@@ -911,7 +995,11 @@ async function executeJournalUpdate() {
                     totalSuccessCount++;
                 }
             }
+            
+            console.log(`[角色日志] 本任务成功更新 ${journals.size} 个角色`);
         }
+        
+        console.log('[角色日志] 手动更新全部完成');
         
         if (totalSuccessCount > 0) {
             toastr.success(`成功更新了 ${totalSuccessCount} 个角色的日志`, '角色日志');
@@ -1942,11 +2030,15 @@ jQuery(async () => {
     setupUIHandlers();
     
     // 监听聊天消息事件
-    eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+    eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         const settings = extension_settings[extensionName];
         if (settings.enabled) {
-            // 这里可以添加自动触发逻辑
             updateStatus();
+            
+            // 自动更新功能
+            if (settings.autoUpdate) {
+                await checkAndAutoUpdate();
+            }
         }
     });
     
