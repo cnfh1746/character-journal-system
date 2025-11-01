@@ -71,10 +71,9 @@ const defaultSettings = {
 • 未出场角色（只是被提到但无实际行动）
 • 无法判断的实体（既无资料也无出场描写）`,
     
-    autoRefine: false,
-    refineThreshold: 5000,
-    keepRecent: 5,
-    refinePrompt: `你是角色档案分析师。请将以下日志条目精炼成简洁的角色档案。
+        autoRefine: false,
+        refineThreshold: 5000,
+        refinePrompt: `你是角色档案分析师。请将以下日志条目精炼成简洁的角色档案。
 
 提取并整理：
 1. 核心性格特征
@@ -1112,9 +1111,7 @@ function loadSettings() {
     
     // 加载智能过滤设置
     $('#cj_filter_enabled').prop('checked', settings.filterEnabled !== undefined ? settings.filterEnabled : true);
-    $('#cj_filter_keywords').val(settings.filterKeywords || '男,男性,他,少年,小伙,男主,男角色');
     $('#cj_min_appearances').val(settings.minAppearances !== undefined ? settings.minAppearances : 5);
-    $('#cj_filter_no_worldinfo').prop('checked', settings.filterNoWorldinfo || false);
     
     // 根据target值显示/隐藏专用世界书字段
     if (settings.target === 'dedicated') {
@@ -1128,7 +1125,6 @@ function loadSettings() {
     
     $('#cj_auto_refine').prop('checked', settings.autoRefine);
     $('#cj_refine_threshold').val(settings.refineThreshold);
-    $('#cj_keep_recent').val(settings.keepRecent);
     $('#cj_refine_prompt').val(settings.refinePrompt);
     
     $('#cj_keywords_template').val(settings.keywordsTemplate);
@@ -1160,16 +1156,13 @@ function saveSettings() {
     
     // 保存智能过滤设置
     settings.filterEnabled = $('#cj_filter_enabled').prop('checked');
-    settings.filterKeywords = $('#cj_filter_keywords').val();
     settings.minAppearances = parseInt($('#cj_min_appearances').val());
-    settings.filterNoWorldinfo = $('#cj_filter_no_worldinfo').prop('checked');
     
     settings.updateThreshold = parseInt($('#cj_update_threshold').val());
     settings.journalPrompt = $('#cj_journal_prompt').val();
     
     settings.autoRefine = $('#cj_auto_refine').prop('checked');
     settings.refineThreshold = parseInt($('#cj_refine_threshold').val());
-    settings.keepRecent = parseInt($('#cj_keep_recent').val());
     settings.refinePrompt = $('#cj_refine_prompt').val();
     
     settings.keywordsTemplate = $('#cj_keywords_template').val();
