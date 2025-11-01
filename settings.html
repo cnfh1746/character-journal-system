@@ -114,6 +114,14 @@
         <h3>📝 日志设置</h3>
         
         <div class="character-journal-field">
+            <label>
+                <input type="checkbox" id="cj_auto_update">
+                启用自动更新
+            </label>
+            <small>达到阈值后自动触发日志更新（无需手动点击）</small>
+        </div>
+        
+        <div class="character-journal-field">
             <label for="cj_update_threshold">更新阈值（消息数）：</label>
             <input type="number" id="cj_update_threshold" min="5" max="100" value="20">
             <small>积累多少条消息后更新一次角色日志</small>

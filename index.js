@@ -1107,6 +1107,7 @@ function loadSettings() {
     $('#cj_manual_characters').val(settings.manualCharacters);
     $('#cj_exclude_names').val(settings.excludeNames || '');
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
+    $('#cj_auto_update').prop('checked', settings.autoUpdate);
     $('#cj_use_worldinfo').prop('checked', settings.useWorldInfo);
     
     // 加载智能过滤设置
@@ -1154,6 +1155,7 @@ function saveSettings() {
     settings.manualCharacters = $('#cj_manual_characters').val();
     settings.excludeNames = $('#cj_exclude_names').val();
     settings.excludeUser = $('#cj_exclude_user').prop('checked');
+    settings.autoUpdate = $('#cj_auto_update').prop('checked');
     settings.useWorldInfo = $('#cj_use_worldinfo').prop('checked');
     
     // 保存智能过滤设置
