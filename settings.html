@@ -23,7 +23,10 @@
 
     <!-- 状态显示（保留） -->
     <div class="character-journal-section">
-        <h3>📊 状态信息</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin: 0;">📊 状态信息</h3>
+            <button class="character-journal-btn" id="cj_refresh_status" style="padding: 6px 12px; font-size: 13px;">🔄 刷新状态</button>
+        </div>
         <div class="character-journal-status" id="cj_status_display">
             等待初始化...
         </div>

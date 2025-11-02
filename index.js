@@ -143,6 +143,7 @@ async function readJournalProgress(lorebookName, characterName) {
     try {
         const bookData = await loadWorldInfo(lorebookName);
         if (!bookData || !bookData.entries) {
+            console.log(`[角色日志] ${characterName}: 世界书无数据`);
             return 0;
         }
         
@@ -151,11 +152,21 @@ async function readJournalProgress(lorebookName, characterName) {
         );
         
         if (!journalEntry) {
+            console.log(`[角色日志] ${characterName}: 未找到条目 (comment应为: ${JOURNAL_COMMENT_PREFIX}${characterName})`);
             return 0;
         }
         
+        console.log(`[角色日志] ${characterName}: 找到条目，content长度=${journalEntry.content.length}`);
+        console.log(`[角色日志] ${characterName}: content末尾100字符:`, journalEntry.content.slice(-100));
+        
         const match = journalEntry.content.match(PROGRESS_SEAL_REGEX);
-        return match ? parseInt(match[1], 10) : 0;
+        if (match) {
+            console.log(`[角色日志] ${characterName}: 成功匹配进度 ${match[1]}楼`);
+            return parseInt(match[1], 10);
+        } else {
+            console.log(`[角色日志] ${characterName}: ❌ 未匹配到进度封印，正则=${PROGRESS_SEAL_REGEX}`);
+            return 0;
+        }
     } catch (error) {
         console.error(`[角色日志] 读取${characterName}的进度失败:`, error);
         return 0;
@@ -1959,6 +1970,24 @@ function setupUIHandlers() {
     // 清空日志按钮
     $('#cj_clear_all').on('click', async function() {
         await clearAllJournals();
+    });
+    
+    // 刷新状态按钮
+    $('#cj_refresh_status').on('click', async function() {
+        console.log('[角色日志] 用户点击刷新状态按钮');
+        const btn = $(this);
+        const originalText = btn.html();
+        btn.prop('disabled', true).html('🔄 刷新中...');
+        
+        try {
+            await updateStatus();
+            toastr.success('状态已刷新', '角色日志');
+        } catch (error) {
+            console.error('[角色日志] 刷新状态失败:', error);
+            toastr.error('刷新失败: ' + error.message, '角色日志');
+        } finally {
+            btn.prop('disabled', false).html(originalText);
+        }
     });
     
     // 检测模式改变时更新显示
