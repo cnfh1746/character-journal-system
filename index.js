@@ -1025,6 +1025,7 @@ async function updateStatus() {
         
         // 从世界书中读取已存在的角色日志
         let trackedCharacters = [];
+        let maxProgress = 0;
         try {
             const bookData = await loadWorldInfo(lorebookName);
             if (bookData && bookData.entries) {
@@ -1034,7 +1035,15 @@ async function updateStatus() {
                 
                 trackedCharacters = journalEntries.map(entry => {
                     const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
-                    return { name: charName };
+                    const match = entry.content.match(PROGRESS_SEAL_REGEX);
+                    const progress = match ? parseInt(match[1], 10) : 0;
+                    
+                    // 更新最大进度
+                    if (progress > maxProgress) {
+                        maxProgress = progress;
+                    }
+                    
+                    return { name: charName, progress: progress };
                 });
             }
         } catch (error) {
@@ -1051,21 +1060,58 @@ async function updateStatus() {
             $('#detected_characters_display').html('<span style="color: #999;">AI将在更新时识别角色</span>');
         }
         
-        let statusHtml = `
-            <strong>当前状态：</strong><br>
-            • 功能状态: ${settings.enabled ? '✓ 已启用' : '✗ 未启用'}<br>
-            • 世界书: ${lorebookName}<br>
-            • 对话长度: ${totalMessages} 楼<br>
-            • 跟踪角色数: ${trackedCharacters.length}<br>
-            <br>
-            <strong>📊 各角色进度：</strong><br>
-        `;
+        // 计算自动触发信息
+        const unloggedCount = totalMessages - maxProgress;
+        const needMoreFloors = Math.max(0, settings.updateThreshold - unloggedCount);
+        const nextTriggerFloor = maxProgress + settings.updateThreshold;
+        
+        let statusHtml = '';
+        
+        // 已记录/待记录状态
+        if (trackedCharacters.length > 0) {
+            statusHtml += `<strong>📝 记录状态：</strong><br>`;
+            statusHtml += `• ✓ 已记录: 1-${maxProgress} 楼<br>`;
+            if (unloggedCount > 0) {
+                statusHtml += `• ⏳ 待记录: ${maxProgress + 1}-${totalMessages} 楼 (共 ${unloggedCount} 楼)<br>`;
+            }
+            statusHtml += `<br>`;
+        }
+        
+        // 自动触发状态
+        if (settings.enabled && settings.autoUpdate) {
+            statusHtml += `<strong>🎯 自动触发：</strong><br>`;
+            statusHtml += `• 自动触发阈值: ${settings.updateThreshold} 楼<br>`;
+            
+            if (unloggedCount >= settings.updateThreshold) {
+                statusHtml += `• <span style="color: #27ae60; font-weight: bold;">✓ 已达到阈值，将在下次消息时触发</span><br>`;
+            } else if (trackedCharacters.length > 0) {
+                statusHtml += `• 还需 <strong>${needMoreFloors}</strong> 楼触发自动更新<br>`;
+                statusHtml += `• 预计触发楼层: 第 <strong>${nextTriggerFloor}</strong> 楼<br>`;
+            } else {
+                statusHtml += `• 暂无角色日志，将在首次达到阈值时自动识别角色<br>`;
+            }
+            statusHtml += `<br>`;
+        } else if (settings.enabled && !settings.autoUpdate) {
+            statusHtml += `<strong>🎯 自动触发：</strong><br>`;
+            statusHtml += `• <span style="color: #999;">自动更新未启用</span><br>`;
+            statusHtml += `<br>`;
+        }
+        
+        // 当前状态
+        statusHtml += `<strong>当前状态：</strong><br>`;
+        statusHtml += `• 功能状态: ${settings.enabled ? '✓ 已启用' : '✗ 未启用'}<br>`;
+        statusHtml += `• 世界书: ${lorebookName}<br>`;
+        statusHtml += `• 对话长度: ${totalMessages} 楼<br>`;
+        statusHtml += `• 跟踪角色数: ${trackedCharacters.length}<br>`;
+        statusHtml += `<br>`;
+        
+        // 各角色进度
+        statusHtml += `<strong>📊 各角色进度：</strong><br>`;
         
         if (trackedCharacters.length > 0) {
             for (const char of trackedCharacters) {
-                const progress = await readJournalProgress(lorebookName, char.name);
-                const percentage = totalMessages > 0 ? Math.round((progress / totalMessages) * 100) : 0;
-                statusHtml += `• ${char.name}: ${progress}/${totalMessages} 楼 (${percentage}%)<br>`;
+                const percentage = totalMessages > 0 ? Math.round((char.progress / totalMessages) * 100) : 0;
+                statusHtml += `• ${char.name}: ${char.progress}/${totalMessages} 楼 (${percentage}%)<br>`;
             }
         } else {
             statusHtml += `<span style="color: #999;">暂无角色日志，点击"手动更新"开始</span><br>`;
