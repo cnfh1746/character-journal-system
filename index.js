@@ -830,40 +830,32 @@ async function checkAndAutoUpdate() {
             return;
         }
         
-        console.log(`[角色日志] 自动检查: 对话总长度 ${context.chat.length} 楼`);
+        console.log(`[角色日志] ========== 自动更新检查 ==========`);
+        console.log(`[角色日志] 对话总长度: ${context.chat.length} 楼`);
+        console.log(`[角色日志] 更新阈值: ${settings.updateThreshold} 楼`);
         console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
         
-        // 检查是否有角色需要更新
-        let needsUpdate = false;
+        // 🔧 修复：使用最大进度作为基准判断
         const maxProgress = characterProgresses.size > 0 
             ? Math.max(...Array.from(characterProgresses.values())) 
             : 0;
         
-        // 检查已有角色是否需要更新
-        for (const [charName, progress] of characterProgresses.entries()) {
-            const unloggedCount = context.chat.length - progress;
-            if (unloggedCount >= settings.updateThreshold) {
-                console.log(`[角色日志] 角色 ${charName} 需要更新: 未记录 ${unloggedCount} 楼 >= 阈值 ${settings.updateThreshold}`);
-                needsUpdate = true;
-                break;
-            }
-        }
+        console.log(`[角色日志] 全局最大进度: ${maxProgress} 楼`);
         
-        // 检查是否需要识别新角色
-        if (!needsUpdate && maxProgress < context.chat.length) {
-            const newMessagesCount = context.chat.length - maxProgress;
-            if (newMessagesCount >= settings.updateThreshold) {
-                console.log(`[角色日志] 检测到新消息: ${newMessagesCount} 楼 >= 阈值 ${settings.updateThreshold}，将识别新角色`);
-                needsUpdate = true;
-            }
-        }
+        // 🔧 关键修复：只看最大进度到当前楼层的差值
+        const unloggedCount = context.chat.length - maxProgress;
+        console.log(`[角色日志] 未记录楼层数: ${unloggedCount} 楼 (${context.chat.length} - ${maxProgress})`);
         
-        if (needsUpdate) {
-            console.log('[角色日志] 触发自动更新...');
-            toastr.info('达到更新阈值，自动更新角色日志...', '角色日志');
+        const shouldUpdate = unloggedCount >= settings.updateThreshold;
+        console.log(`[角色日志] 是否触发更新: ${shouldUpdate} (${unloggedCount} >= ${settings.updateThreshold})`);
+        console.log(`[角色日志] =====================================`);
+        
+        if (shouldUpdate) {
+            console.log('[角色日志] ✓ 达到阈值，触发自动更新');
+            toastr.info(`达到更新阈值(${unloggedCount}楼)，自动更新角色日志...`, '角色日志');
             await executeJournalUpdate();
         } else {
-            console.log('[角色日志] 未达到更新阈值，跳过自动更新');
+            console.log(`[角色日志] ✗ 未达到阈值，跳过 (还需${settings.updateThreshold - unloggedCount}楼)`);
         }
         
     } catch (error) {
