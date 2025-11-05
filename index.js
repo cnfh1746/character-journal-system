@@ -863,7 +863,7 @@ async function checkAndAutoUpdate() {
     }
 }
 
-// 执行日志更新
+// 执行日志更新（带智能重试机制）
 async function executeJournalUpdate() {
     const settings = extension_settings[extensionName];
     const context = getContext();
@@ -961,6 +961,9 @@ async function executeJournalUpdate() {
         
         console.log(`[角色日志] 总共 ${rangeMap.size} 个更新任务`);
         
+        // 🎯 智能重试机制：记录失败的范围
+        const failedRanges = [];
+        
         // 执行更新
         let totalSuccessCount = 0;
         let taskIndex = 0;
@@ -972,28 +975,61 @@ async function executeJournalUpdate() {
             
             console.log(`[角色日志] 任务 ${taskIndex}/${rangeMap.size}: ${taskInfo}`);
             
+            // 记录更新前的预期角色数量
+            const expectedCharCount = range.characters ? range.characters.length : -1; // -1表示AI识别模式，不确定数量
+            
             // 传递range对象，其中可能包含existingCharacters信息
             const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
             
             if (!journals || journals.size === 0) {
                 console.log('[角色日志] 本任务未生成任何日志');
+                // 🎯 如果是已存在角色更新失败，记录为失败范围
+                if (range.characters && range.characters.length > 0) {
+                    failedRanges.push({
+                        range: range,
+                        expectedCount: expectedCharCount,
+                        actualCount: 0,
+                        successChars: [],
+                        failedChars: range.characters
+                    });
+                }
                 continue;
             }
             
-            // 更新每个角色的日志条目
+            // 更新每个角色的日志条目，并记录成功的角色
+            const successChars = [];
             for (const [charName, journalContent] of journals.entries()) {
                 const success = await updateCharacterJournal(charName, journalContent, range.startFloor, range.endFloor);
                 if (success) {
                     totalSuccessCount++;
+                    successChars.push(charName);
                 }
             }
             
             console.log(`[角色日志] 本任务成功更新 ${journals.size} 个角色`);
+            
+            // 🎯 检测部分失败：如果是已存在角色更新，且成功数量少于预期
+            if (range.characters && range.characters.length > 0 && successChars.length < range.characters.length) {
+                const failedChars = range.characters.filter(c => !successChars.includes(c));
+                console.warn(`[角色日志] ⚠️ 范围 ${range.startFloor}-${range.endFloor} 部分失败！预期${range.characters.length}个，实际${successChars.length}个`);
+                console.warn(`[角色日志] 失败的角色:`, failedChars);
+                
+                failedRanges.push({
+                    range: range,
+                    expectedCount: range.characters.length,
+                    actualCount: successChars.length,
+                    successChars: successChars,
+                    failedChars: failedChars
+                });
+            }
         }
         
         console.log('[角色日志] 手动更新全部完成');
         
-        if (totalSuccessCount > 0) {
+        // 🎯 如果有失败的范围，弹窗询问是否重试
+        if (failedRanges.length > 0) {
+            await showRetryDialog(failedRanges, 'manual');
+        } else if (totalSuccessCount > 0) {
             toastr.success(`成功更新了 ${totalSuccessCount} 个角色的日志`, '角色日志');
             await updateStatus();
             return true;
@@ -1001,6 +1037,9 @@ async function executeJournalUpdate() {
             toastr.warning('未能生成任何日志', '角色日志');
             return false;
         }
+        
+        await updateStatus();
+        return totalSuccessCount > 0;
     } catch (error) {
         console.error('[角色日志] 执行更新失败:', error);
         toastr.error(`更新失败: ${error.message}`, '角色日志');
@@ -1842,7 +1881,7 @@ async function generateForSpecificCharacter() {
     }
 }
 
-// 执行批量更新（修复版：为已有角色续写，同时识别新角色）
+// 执行批量更新（✅ 修复版：统一逻辑与手动/自动更新一致）
 async function executeBatchUpdate(startFloor, endFloor) {
     const settings = extension_settings[extensionName];
     const threshold = settings.updateThreshold;
@@ -1871,59 +1910,74 @@ async function executeBatchUpdate(startFloor, endFloor) {
     console.log(`[角色日志] 批量更新: ${startFloor}-${endFloor}楼`);
     console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
     
-    // 🔧 关键修复：为已有角色生成更新范围
+    // ✅ 核心修复：使用统一逻辑
     const updateRanges = [];
     
-    // 步骤1：为每个已有角色计算续写范围
-    for (const [charName, progress] of characterProgresses.entries()) {
-        // 如果角色进度在批量更新范围内，需要更新
-        if (progress < endFloor) {
-            const charStartFloor = Math.max(progress + 1, startFloor);
-            const charEndFloor = endFloor;
-            
-            if (charStartFloor <= charEndFloor) {
-                // 按阈值分批
-                let currentFloor = charStartFloor;
-                while (currentFloor <= charEndFloor) {
-                    const batchEnd = Math.min(currentFloor + threshold - 1, charEndFloor);
-                    updateRanges.push({
-                        characters: [charName],
-                        startFloor: currentFloor,
-                        endFloor: batchEnd,
-                        isExisting: true
-                    });
-                    console.log(`[角色日志] 为已有角色 ${charName} 添加更新范围: ${currentFloor}-${batchEnd}楼`);
-                    currentFloor = batchEnd + 1;
-                }
+    if (characterProgresses.size > 0) {
+        // ✅ 关键：找出最大进度，统一从最大进度往后读取（与手动/自动更新一致）
+        const maxProgress = Math.max(...Array.from(characterProgresses.values()));
+        const allCharacters = Array.from(characterProgresses.keys());
+        
+        console.log(`[角色日志] 所有角色的最大进度: ${maxProgress}楼`);
+        console.log(`[角色日志] 将为所有角色统一读取: ${maxProgress + 1}楼往后`);
+        
+        // ✅ 从最大进度往后，按阈值分批，所有角色一起更新
+        let currentFloor = Math.max(maxProgress + 1, startFloor);
+        
+        // 只处理用户指定范围内且在最大进度之后的部分
+        if (currentFloor <= endFloor) {
+            while (currentFloor <= endFloor) {
+                const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
+                
+                updateRanges.push({
+                    characters: allCharacters, // ✅ 所有已有角色一起处理
+                    startFloor: currentFloor,
+                    endFloor: batchEnd,
+                    isExisting: true
+                });
+                
+                console.log(`[角色日志] 添加更新范围: ${currentFloor}-${batchEnd}楼 (所有${allCharacters.length}个角色)`);
+                currentFloor = batchEnd + 1;
             }
         }
-    }
-    
-    // 步骤2：识别新角色（在全局最大进度之后）
-    const maxProgress = characterProgresses.size > 0 
-        ? Math.max(...Array.from(characterProgresses.values())) 
-        : 0;
-    
-    if (maxProgress < endFloor) {
+        
+        // ✅ 识别新角色：只在最大进度之后的范围识别
         const newCharStartFloor = Math.max(maxProgress + 1, startFloor);
-        // 按阈值分批识别新角色
-        let currentFloor = newCharStartFloor;
+        if (newCharStartFloor <= endFloor) {
+            currentFloor = newCharStartFloor;
+            while (currentFloor <= endFloor) {
+                const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
+                updateRanges.push({
+                    characters: null, // null表示AI识别新角色
+                    startFloor: currentFloor,
+                    endFloor: batchEnd,
+                    isExisting: false,
+                    existingCharacters: allCharacters // 传递已有角色用于排除
+                });
+                console.log(`[角色日志] 添加新角色识别范围: ${currentFloor}-${batchEnd}楼`);
+                currentFloor = batchEnd + 1;
+            }
+        }
+    } else {
+        // 没有任何日志，从用户指定的起始位置开始识别
+        console.log('[角色日志] 无现有角色，从头开始识别');
+        let currentFloor = startFloor;
         while (currentFloor <= endFloor) {
             const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
             updateRanges.push({
-                characters: null, // null表示AI识别新角色
+                characters: null, // AI自动识别
                 startFloor: currentFloor,
                 endFloor: batchEnd,
-                isExisting: false,
-                existingCharacters: Array.from(characterProgresses.keys())
+                isExisting: false
             });
-            console.log(`[角色日志] 添加新角色识别范围: ${currentFloor}-${batchEnd}楼`);
+            console.log(`[角色日志] 添加识别范围: ${currentFloor}-${batchEnd}楼`);
             currentFloor = batchEnd + 1;
         }
     }
     
     if (updateRanges.length === 0) {
         console.log('[角色日志] 没有需要更新的范围');
+        toastr.info('选定范围内的日志已是最新，无需更新', '角色日志');
         return;
     }
     
@@ -1940,15 +1994,36 @@ async function executeBatchUpdate(startFloor, endFloor) {
         $('#batch_progress_info').html(info);
     }
     
+    // ✅ 按范围合并：相同楼层范围的更新和识别可以合并为一次API调用
+    const rangeMap = new Map();
+    for (const range of updateRanges) {
+        const key = `${range.startFloor}-${range.endFloor}`;
+        if (!rangeMap.has(key)) {
+            rangeMap.set(key, range);
+        } else {
+            // 如果是相同范围的已有角色更新，合并到一起
+            const existing = rangeMap.get(key);
+            if (range.characters && existing.characters) {
+                // 合并角色列表，去重
+                const mergedChars = [...new Set([...existing.characters, ...range.characters])];
+                existing.characters = mergedChars;
+                console.log(`[角色日志] 合并相同范围的角色: ${key}楼`);
+            }
+        }
+    }
+    
+    const finalTasks = Array.from(rangeMap.values());
+    console.log(`[角色日志] 合并后的任务数: ${finalTasks.length}`);
+    
     // 执行所有更新任务
-    for (let i = 0; i < updateRanges.length; i++) {
-        const range = updateRanges[i];
+    for (let i = 0; i < finalTasks.length; i++) {
+        const range = finalTasks[i];
         const taskInfo = range.characters 
             ? `更新 ${range.characters.join(', ')} (${range.startFloor}-${range.endFloor}楼)`
             : `识别新角色 (${range.startFloor}-${range.endFloor}楼)`;
         
-        console.log(`[角色日志] 任务 ${i + 1}/${totalTasks}: ${taskInfo}`);
-        updateProgress(i, totalTasks, `任务 ${i + 1}/${totalTasks}: ${taskInfo}`);
+        console.log(`[角色日志] 任务 ${i + 1}/${finalTasks.length}: ${taskInfo}`);
+        updateProgress(i, finalTasks.length, `任务 ${i + 1}/${finalTasks.length}: ${taskInfo}`);
         
         const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
         
@@ -1965,15 +2040,177 @@ async function executeBatchUpdate(startFloor, endFloor) {
         }
         
         completedTasks++;
-        updateProgress(completedTasks, totalTasks, `✓ 已完成 ${completedTasks}/${totalTasks} 个任务`);
+        updateProgress(completedTasks, finalTasks.length, `✓ 已完成 ${completedTasks}/${finalTasks.length} 个任务`);
         
         // 短暂延迟避免API限流
-        if (i < updateRanges.length - 1) {
+        if (i < finalTasks.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
     }
     
     console.log('[角色日志] 批量更新全部完成');
+}
+
+// 🎯 显示重试对话框
+async function showRetryDialog(failedRanges, updateType) {
+    console.log('[角色日志] 显示重试对话框，失败范围数:', failedRanges.length);
+    
+    // 构建失败信息
+    let failureInfo = '';
+    let totalFailed = 0;
+    
+    for (const fail of failedRanges) {
+        const range = fail.range;
+        failureInfo += `<div style="margin-bottom: 10px; padding: 10px; background: #fff3cd; border-radius: 4px;">`;
+        failureInfo += `<strong>📍 范围: ${range.startFloor}-${range.endFloor}楼</strong><br>`;
+        
+        if (fail.expectedCount > 0) {
+            failureInfo += `<span style="color: #856404;">预期更新 ${fail.expectedCount} 个角色，实际成功 ${fail.actualCount} 个</span><br>`;
+        }
+        
+        if (fail.successChars.length > 0) {
+            failureInfo += `<span style="color: #27ae60;">✓ 成功: ${fail.successChars.join(', ')}</span><br>`;
+        }
+        
+        if (fail.failedChars.length > 0) {
+            failureInfo += `<span style="color: #e74c3c;">✗ 失败: ${fail.failedChars.join(', ')}</span>`;
+            totalFailed += fail.failedChars.length;
+        }
+        
+        failureInfo += `</div>`;
+    }
+    
+    const modalHtml = `
+        <div class="character-journal-modal" id="retry_dialog_modal">
+            <div class="character-journal-modal-content" style="max-width: 600px;">
+                <div class="character-journal-modal-header">
+                    <h2>⚠️ 日志更新部分失败</h2>
+                </div>
+                <div class="character-journal-modal-body">
+                    <div style="margin-bottom: 15px;">
+                        <p style="color: #856404; font-weight: bold;">
+                            检测到 ${failedRanges.length} 个范围的更新未完全成功，共 ${totalFailed} 个角色失败。
+                        </p>
+                        <p style="color: #666;">
+                            可能原因：AI未能为该角色生成日志（角色未出场、被过滤等）
+                        </p>
+                    </div>
+                    
+                    <div style="max-height: 300px; overflow-y: auto; margin-bottom: 15px;">
+                        ${failureInfo}
+                    </div>
+                    
+                    <div style="padding: 10px; background: #e3f2fd; border-radius: 4px; margin-bottom: 15px;">
+                        <strong>🔄 重试说明：</strong><br>
+                        • 系统将只针对<strong>失败的角色</strong>重新生成日志<br>
+                        • 已成功的角色<strong>不会重复追加</strong><br>
+                        • 重试时会使用相同的楼层范围
+                    </div>
+                    
+                    <div style="text-align: center; font-size: 16px; font-weight: bold; color: #333;">
+                        是否重试这些失败的角色？
+                    </div>
+                </div>
+                <div class="character-journal-modal-footer">
+                    <button class="character-journal-btn" id="cancel_retry">取消</button>
+                    <button class="character-journal-btn success" id="confirm_retry">是，重试</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    $('body').append(modalHtml);
+    
+    // 等待用户响应
+    return new Promise((resolve) => {
+        $('#confirm_retry').on('click', async function() {
+            $('#retry_dialog_modal').remove();
+            
+            // 执行重试
+            toastr.info('开始重试失败的角色...', '角色日志');
+            await retryFailedRanges(failedRanges);
+            
+            resolve(true);
+        });
+        
+        $('#cancel_retry').on('click', function() {
+            $('#retry_dialog_modal').remove();
+            toastr.info('已取消重试', '角色日志');
+            resolve(false);
+        });
+        
+        // 点击背景取消
+        $('#retry_dialog_modal').on('click', function(e) {
+            if (e.target.id === 'retry_dialog_modal') {
+                $(this).remove();
+                toastr.info('已取消重试', '角色日志');
+                resolve(false);
+            }
+        });
+    });
+}
+
+// 🎯 重试失败的范围（只重试失败的角色）
+async function retryFailedRanges(failedRanges) {
+    let totalRetrySuccess = 0;
+    let totalRetryFailed = 0;
+    
+    for (const fail of failedRanges) {
+        const range = fail.range;
+        const failedChars = fail.failedChars;
+        
+        if (failedChars.length === 0) continue;
+        
+        console.log(`[角色日志] 重试范围 ${range.startFloor}-${range.endFloor}，失败的角色:`, failedChars);
+        toastr.info(`重试 ${range.startFloor}-${range.endFloor}楼 (${failedChars.join(', ')})`, '角色日志');
+        
+        // 🔧 关键：只为失败的角色重新生成日志
+        const retryRange = {
+            characters: failedChars, // 只重试失败的角色
+            startFloor: range.startFloor,
+            endFloor: range.endFloor,
+            isExisting: true,
+            isRetry: true // 标记为重试
+        };
+        
+        try {
+            const journals = await generateCharacterJournals(range.startFloor, range.endFloor, retryRange);
+            
+            if (journals && journals.size > 0) {
+                // 更新每个成功生成的角色
+                for (const [charName, journalContent] of journals.entries()) {
+                    const success = await updateCharacterJournal(charName, journalContent, range.startFloor, range.endFloor);
+                    if (success) {
+                        totalRetrySuccess++;
+                        console.log(`[角色日志] ✓ 重试成功: ${charName}`);
+                    } else {
+                        totalRetryFailed++;
+                        console.log(`[角色日志] ✗ 重试仍失败: ${charName}`);
+                    }
+                }
+            } else {
+                console.log(`[角色日志] ✗ 重试范围 ${range.startFloor}-${range.endFloor} 仍未生成日志`);
+                totalRetryFailed += failedChars.length;
+            }
+        } catch (error) {
+            console.error(`[角色日志] 重试范围 ${range.startFloor}-${range.endFloor} 时出错:`, error);
+            totalRetryFailed += failedChars.length;
+        }
+        
+        // 短暂延迟避免API限流
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    // 显示重试结果
+    if (totalRetrySuccess > 0 && totalRetryFailed === 0) {
+        toastr.success(`重试成功！更新了 ${totalRetrySuccess} 个角色的日志`, '角色日志');
+    } else if (totalRetrySuccess > 0 && totalRetryFailed > 0) {
+        toastr.warning(`重试部分成功：成功 ${totalRetrySuccess} 个，仍失败 ${totalRetryFailed} 个`, '角色日志');
+    } else {
+        toastr.error(`重试失败：所有角色仍未能生成日志`, '角色日志');
+    }
+    
+    await updateStatus();
 }
 
 // 设置UI事件监听
