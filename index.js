@@ -562,6 +562,7 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
     
     // 根据检测模式获取角色列表
     let finalCharacters;
+    let isManualMode = false; // 标记是否为手动输入模式
     
     // 如果有明确指定的角色列表，直接使用
     if (rangeInfo && rangeInfo.characters && rangeInfo.characters.length > 0) {
@@ -589,7 +590,8 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
             isUser: false
         }));
         
-        console.log('[角色日志] 手动模式 - 使用用户指定的角色:', manualNames);
+        isManualMode = true; // 标记为手动模式
+        console.log('[角色日志] 手动模式 - 使用用户指定的角色（不应用出场次数过滤）:', manualNames);
     } else {
         // 自动模式：使用AI识别角色
         toastr.info('AI正在识别角色...', '角色日志');
@@ -602,25 +604,25 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
             toastr.warning('AI未能识别到新角色', '角色日志');
             return null;
         }
+    }
+    
+    // 🔧 统一应用出场次数过滤（手动模式除外）
+    if (!isManualMode && settings.filterEnabled && settings.minAppearances > 0) {
+        toastr.info('正在应用出场次数过滤...', '角色日志');
         
-        // 🔧 应用出场次数过滤（在AI识别之后）
-        if (settings.filterEnabled && settings.minAppearances > 0) {
-            toastr.info('正在应用出场次数过滤...', '角色日志');
-            
-            const beforeCount = finalCharacters.length;
-            finalCharacters = await filterCharacters(finalCharacters, messages);
-            const afterCount = finalCharacters.length;
-            
-            if (afterCount < beforeCount) {
-                console.log(`[角色日志] 出场次数过滤: ${beforeCount} -> ${afterCount} (过滤掉 ${beforeCount - afterCount} 个)`);
-                toastr.info(`出场次数过滤: 保留 ${afterCount}/${beforeCount} 个角色`, '角色日志');
-            }
-            
-            if (finalCharacters.length === 0) {
-                console.log('[角色日志] 出场次数过滤后无剩余角色');
-                toastr.warning('所有识别的角色都被过滤掉了（出场次数不足）', '角色日志');
-                return null;
-            }
+        const beforeCount = finalCharacters.length;
+        finalCharacters = await filterCharacters(finalCharacters, messages);
+        const afterCount = finalCharacters.length;
+        
+        if (afterCount < beforeCount) {
+            console.log(`[角色日志] 出场次数过滤: ${beforeCount} -> ${afterCount} (过滤掉 ${beforeCount - afterCount} 个)`);
+            toastr.info(`出场次数过滤: 保留 ${afterCount}/${beforeCount} 个角色`, '角色日志');
+        }
+        
+        if (finalCharacters.length === 0) {
+            console.log('[角色日志] 出场次数过滤后无剩余角色');
+            toastr.warning('所有识别的角色都被过滤掉了（出场次数不足）', '角色日志');
+            return null;
         }
     }
     
