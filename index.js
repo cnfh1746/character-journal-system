@@ -1881,13 +1881,13 @@ async function generateForSpecificCharacter() {
     }
 }
 
-// 执行批量更新（✅ 修复版：统一逻辑与手动/自动更新一致）
+// 执行批量更新（✅ 强制更新版：始终更新选定范围，无论是否已有进度）
 async function executeBatchUpdate(startFloor, endFloor) {
     const settings = extension_settings[extensionName];
     const threshold = settings.updateThreshold;
     const lorebookName = await getTargetLorebookName();
     
-    // 读取所有角色的当前进度
+    // 读取所有角色的当前进度（仅用于识别已有角色，不用于判断是否需要更新）
     const characterProgresses = new Map();
     try {
         const bookData = await loadWorldInfo(lorebookName);
@@ -1907,56 +1907,47 @@ async function executeBatchUpdate(startFloor, endFloor) {
         console.log('[角色日志] 无法读取现有进度，将从头开始');
     }
     
-    console.log(`[角色日志] 批量更新: ${startFloor}-${endFloor}楼`);
+    console.log(`[角色日志] 批量更新: ${startFloor}-${endFloor}楼 (强制更新模式)`);
     console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
     
-    // ✅ 核心修复：使用统一逻辑
+    // ✅ 核心修复：批量更新始终处理用户选定的范围，无论是否已有进度
     const updateRanges = [];
+    const allCharacters = Array.from(characterProgresses.keys());
     
     if (characterProgresses.size > 0) {
-        // ✅ 关键：找出最大进度，统一从最大进度往后读取（与手动/自动更新一致）
-        const maxProgress = Math.max(...Array.from(characterProgresses.values()));
-        const allCharacters = Array.from(characterProgresses.keys());
+        console.log(`[角色日志] 已有角色: ${allCharacters.join(', ')}`);
+        console.log(`[角色日志] 将强制更新选定范围: ${startFloor}-${endFloor}楼`);
         
-        console.log(`[角色日志] 所有角色的最大进度: ${maxProgress}楼`);
-        console.log(`[角色日志] 将为所有角色统一读取: ${maxProgress + 1}楼往后`);
-        
-        // ✅ 从最大进度往后，按阈值分批，所有角色一起更新
-        let currentFloor = Math.max(maxProgress + 1, startFloor);
-        
-        // 只处理用户指定范围内且在最大进度之后的部分
-        if (currentFloor <= endFloor) {
-            while (currentFloor <= endFloor) {
-                const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
-                
-                updateRanges.push({
-                    characters: allCharacters, // ✅ 所有已有角色一起处理
-                    startFloor: currentFloor,
-                    endFloor: batchEnd,
-                    isExisting: true
-                });
-                
-                console.log(`[角色日志] 添加更新范围: ${currentFloor}-${batchEnd}楼 (所有${allCharacters.length}个角色)`);
-                currentFloor = batchEnd + 1;
-            }
+        // ✅ 强制更新：从用户选定的起始楼层开始，按阈值分批更新所有已有角色
+        let currentFloor = startFloor;
+        while (currentFloor <= endFloor) {
+            const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
+            
+            updateRanges.push({
+                characters: allCharacters, // 所有已有角色一起处理
+                startFloor: currentFloor,
+                endFloor: batchEnd,
+                isExisting: true,
+                forceUpdate: true // 标记为强制更新
+            });
+            
+            console.log(`[角色日志] 添加强制更新范围: ${currentFloor}-${batchEnd}楼 (${allCharacters.length}个角色)`);
+            currentFloor = batchEnd + 1;
         }
         
-        // ✅ 识别新角色：只在最大进度之后的范围识别
-        const newCharStartFloor = Math.max(maxProgress + 1, startFloor);
-        if (newCharStartFloor <= endFloor) {
-            currentFloor = newCharStartFloor;
-            while (currentFloor <= endFloor) {
-                const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
-                updateRanges.push({
-                    characters: null, // null表示AI识别新角色
-                    startFloor: currentFloor,
-                    endFloor: batchEnd,
-                    isExisting: false,
-                    existingCharacters: allCharacters // 传递已有角色用于排除
-                });
-                console.log(`[角色日志] 添加新角色识别范围: ${currentFloor}-${batchEnd}楼`);
-                currentFloor = batchEnd + 1;
-            }
+        // ✅ 同时识别新角色（在相同范围内）
+        currentFloor = startFloor;
+        while (currentFloor <= endFloor) {
+            const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
+            updateRanges.push({
+                characters: null, // null表示AI识别新角色
+                startFloor: currentFloor,
+                endFloor: batchEnd,
+                isExisting: false,
+                existingCharacters: allCharacters // 传递已有角色用于排除
+            });
+            console.log(`[角色日志] 添加新角色识别范围: ${currentFloor}-${batchEnd}楼`);
+            currentFloor = batchEnd + 1;
         }
     } else {
         // 没有任何日志，从用户指定的起始位置开始识别
@@ -1975,11 +1966,7 @@ async function executeBatchUpdate(startFloor, endFloor) {
         }
     }
     
-    if (updateRanges.length === 0) {
-        console.log('[角色日志] 没有需要更新的范围');
-        toastr.info('选定范围内的日志已是最新，无需更新', '角色日志');
-        return;
-    }
+    // ✅ 批量更新模式下，总是有任务要执行（不再检查是否为空）
     
     console.log(`[角色日志] 总共 ${updateRanges.length} 个更新任务`);
     
