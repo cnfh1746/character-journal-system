@@ -909,7 +909,7 @@ async function executeJournalUpdate() {
             const allCharacters = Array.from(characterProgresses.keys());
             
             console.log(`[角色日志] 所有角色的最大进度: ${maxProgress}楼`);
-            console.log(`[角色日志] 🔧 将调用AI识别 ${maxProgress + 1}楼往后出场的角色`);
+            console.log(`[角色日志] 🔧 将调用AI识别 ${maxProgress + 1}楼往后出场的角色（包括已有角色）`);
             
             // 🔧 核心修复：从最大进度往后，让AI识别每个范围内实际出场的角色（包括已有角色）
             let currentFloor = maxProgress + 1;
@@ -917,14 +917,14 @@ async function executeJournalUpdate() {
                 const batchEnd = Math.min(currentFloor + settings.updateThreshold - 1, context.chat.length);
                 
                 updateRanges.push({
-                    characters: null, // ❌ 不再直接使用allCharacters，让AI识别
+                    characters: null, // 让AI识别所有出场角色
                     startFloor: currentFloor,
                     endFloor: batchEnd,
-                    isExisting: false, // 标记为需要AI识别
-                    existingCharacters: allCharacters // 传递已有角色列表用于过滤（AI会返回所有出场角色，包括已有的）
+                    isExisting: false
+                    // ✅ 修复：不传 existingCharacters，让AI识别所有出场角色（包括已有的）
                 });
                 
-                console.log(`[角色日志] 添加AI识别范围: ${currentFloor}-${batchEnd}楼 (将识别实际出场的角色)`);
+                console.log(`[角色日志] 添加AI识别范围: ${currentFloor}-${batchEnd}楼 (AI将识别所有实际出场的角色)`);
                 currentFloor = batchEnd + 1;
             }
             
