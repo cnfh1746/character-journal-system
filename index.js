@@ -1071,6 +1071,14 @@ async function executeJournalUpdate() {
         if (failedRanges.length > 0) {
             await showRetryDialog(failedRanges, 'manual');
         } else if (totalSuccessCount > 0) {
+            // ✅ 修复：更新成功后，确保世界书已绑定到聊天
+            console.log('[角色日志] 确保世界书已绑定到聊天...');
+            const bindSuccess = await bindWorldbookToChat(lorebookName);
+            if (bindSuccess) {
+                console.log('[角色日志] ✓ 世界书已绑定到当前聊天');
+                toastr.info('世界书已绑定到聊天', '角色日志');
+            }
+            
             toastr.success(`成功更新了 ${totalSuccessCount} 个角色的日志`, '角色日志');
             await updateStatus();
             return true;
@@ -1997,6 +2005,13 @@ async function executeBatchUpdate(startFloor, endFloor) {
     
     console.log('[角色日志] 批量更新全部完成');
     console.log('[角色日志] ===================================');
+    
+    // ✅ 修复：批量更新成功后，确保世界书已绑定到聊天
+    console.log('[角色日志] 确保世界书已绑定到聊天...');
+    const bindSuccess = await bindWorldbookToChat(lorebookName);
+    if (bindSuccess) {
+        console.log('[角色日志] ✓ 世界书已绑定到当前聊天');
+    }
 }
 
 // 🎯 显示重试对话框
