@@ -112,11 +112,22 @@ async function bindWorldbookToChat(worldbookName) {
     const context = getContext();
     
     try {
+        // 🔧 关键修复：TavernHelper需要文件名（xxx.json），而不是显示名称
+        // 我们需要将显示名称转换为文件名
+        const worldbookFileName = worldbookName.endsWith('.json') ? worldbookName : `${worldbookName}.json`;
+        
+        console.log(`[角色日志] 尝试绑定世界书: ${worldbookName} -> ${worldbookFileName}`);
+        
         // 方法1：优先尝试使用TavernHelper API（如果存在）
         if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
-            await TavernHelper.setChatLorebook(worldbookName);
-            console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
-            return true;
+            try {
+                await TavernHelper.setChatLorebook(worldbookFileName);
+                console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookFileName}`);
+                return true;
+            } catch (helperError) {
+                console.warn(`[角色日志] TavernHelper绑定失败: ${helperError.message}，尝试方法2`);
+                // 如果TavernHelper失败，继续尝试方法2
+            }
         }
         
         // 方法2：直接修改chat_metadata并触发保存
@@ -124,16 +135,16 @@ async function bindWorldbookToChat(worldbookName) {
             context.chat_metadata = {};
         }
         
+        // 直接使用显示名称（不带.json）
         context.chat_metadata.world_info = worldbookName;
         
         // 触发SillyTavern的聊天保存机制
-        // 使用eventSource触发CHAT_CHANGED事件，让ST自动保存
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
             eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
         }
         
         console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
-        console.log(`[角色日志] 提示: 请确保保存当前聊天以持久化此设置`);
+        console.log(`[角色日志] 提示: 请手动保存当前聊天以持久化此设置`);
         return true;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
