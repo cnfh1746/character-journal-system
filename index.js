@@ -2396,10 +2396,10 @@ jQuery(async () => {
         updateStatus();
     });
     
-    // 监听角色切换事件
-    eventSource.on(event_types.CHARACTER_SELECTED, async () => {
+    // 监听角色切换事件（正确的事件是 CHAT_CHANGED）
+    eventSource.on(event_types.CHAT_CHANGED, async () => {
         try {
-            console.log('[角色日志] ========== 🔔 CHARACTER_SELECTED 事件触发 ==========');
+            console.log('[角色日志] ========== 🔔 CHAT_CHANGED 事件触发 ==========');
             
             const settings = extension_settings[extensionName];
             console.log('[角色日志] 功能启用状态:', settings?.enabled);
