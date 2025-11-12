@@ -107,35 +107,89 @@ const defaultSettings = {
     }
 };
 
-// 获取目标世界书名称
+// 自动绑定世界书到聊天
+async function bindWorldbookToChat(worldbookName) {
+    const context = getContext();
+    
+    try {
+        // 设置聊天元数据中的世界书
+        if (!context.chat_metadata) {
+            context.chat_metadata = {};
+        }
+        
+        context.chat_metadata.world_info = worldbookName;
+        
+        // 保存聊天元数据
+        await fetch('/api/chats/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chat_id: context.chatId,
+                metadata: context.chat_metadata
+            })
+        });
+        
+        console.log(`[角色日志] 已将世界书 "${worldbookName}" 绑定到当前聊天`);
+        return true;
+    } catch (error) {
+        console.error('[角色日志] 绑定世界书失败:', error);
+        return false;
+    }
+}
+
+// 获取目标世界书名称（智能切换版）
 async function getTargetLorebookName() {
     const settings = extension_settings[extensionName];
     const context = getContext();
     
-    if (settings.target === "character_main") {
-        // 获取当前聊天的世界书
-        const chatMetadata = context.chat_metadata || {};
-        const chatWorldbook = chatMetadata.world_info;
-        
-        if (chatWorldbook) {
-            return chatWorldbook;
-        }
-        
-        // 如果没有聊天世界书，创建一个新的
-        const chatId = context.chatId || "chat";
-        const charName = context.name2 || "character";
-        return `${charName}-Journal-${chatId}`;
-    } else {
-        // 专用世界书模式
+    if (settings.target === "dedicated") {
+        // 专用世界书模式：使用用户指定的固定世界书
         if (settings.dedicatedWorldbook && settings.dedicatedWorldbook.trim()) {
-            // 使用自定义名称
             return settings.dedicatedWorldbook.trim();
         } else {
-            // 自动生成名称
             const chatId = context.chatId || "unknown";
             return `CharacterJournal-${chatId}`;
         }
     }
+    
+    // character_main 模式：根据角色名自动生成世界书
+    const charName = context.name2 || "角色";
+    const worldbookName = `${charName}日志`;
+    
+    console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
+    
+    // 检查世界书是否存在
+    try {
+        await loadWorldInfo(worldbookName);
+        console.log(`[角色日志] ✓ 找到世界书: ${worldbookName}`);
+    } catch (error) {
+        // 世界书不存在，自动创建
+        console.log(`[角色日志] ✗ 世界书不存在，开始自动创建: ${worldbookName}`);
+        
+        const newBookData = {
+            entries: {},
+            name: worldbookName
+        };
+        
+        try {
+            await saveWorldInfo(worldbookName, newBookData, true);
+            console.log(`[角色日志] ✓ 成功创建世界书: ${worldbookName}`);
+            toastr.success(`已自动创建世界书: ${worldbookName}`, '角色日志');
+            
+            // 自动绑定到聊天
+            const bindSuccess = await bindWorldbookToChat(worldbookName);
+            if (bindSuccess) {
+                console.log(`[角色日志] ✓ 已绑定到当前聊天`);
+            }
+        } catch (createError) {
+            console.error(`[角色日志] ✗ 创建世界书失败:`, createError);
+            toastr.error(`创建世界书失败: ${createError.message}`, '角色日志');
+        }
+    }
+    
+    return worldbookName;
 }
 
 // 读取角色日志进度
@@ -2295,6 +2349,28 @@ jQuery(async () => {
     
     eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
         updateStatus();
+    });
+    
+    // 监听角色切换事件
+    eventSource.on(event_types.CHARACTER_SELECTED, async () => {
+        const settings = extension_settings[extensionName];
+        if (settings.enabled && settings.target === "character_main") {
+            console.log('[角色日志] ========== 检测到角色切换 ==========');
+            
+            const context = getContext();
+            const newCharName = context.name2 || "角色";
+            console.log(`[角色日志] 新角色: ${newCharName}`);
+            
+            // 自动切换世界书
+            const newWorldbook = await getTargetLorebookName();
+            console.log(`[角色日志] 切换到世界书: ${newWorldbook}`);
+            console.log('[角色日志] =====================================');
+            
+            // 刷新状态显示
+            await updateStatus();
+            
+            toastr.info(`已加载 ${newWorldbook}`, '角色日志');
+        }
     });
     
     console.log('[角色日志系统] 扩展已加载');
