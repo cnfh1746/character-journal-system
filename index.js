@@ -107,16 +107,19 @@ const defaultSettings = {
     }
 };
 
-// 自动绑定世界书到聊天
+// 自动绑定世界书到聊天（参考世界书统计脚本的实现）
 async function bindWorldbookToChat(worldbookName) {
     const context = getContext();
     
     try {
         // 方法1：优先尝试使用TavernHelper API（如果存在）
-        if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
-            await TavernHelper.setChatLorebook(worldbookName);
-            console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
-            return true;
+        if (typeof TavernHelper !== 'undefined' && TavernHelper.getOrCreateChatLorebook) {
+            try {
+                await TavernHelper.getOrCreateChatLorebook();
+                console.log(`[角色日志] ✓ 使用TavernHelper获取或创建聊天世界书`);
+            } catch (e) {
+                console.log('[角色日志] TavernHelper.getOrCreateChatLorebook 调用失败:', e);
+            }
         }
         
         // 方法2：直接修改chat_metadata并触发保存
@@ -126,26 +129,17 @@ async function bindWorldbookToChat(worldbookName) {
         
         context.chat_metadata.world_info = worldbookName;
         
-        // 🔥 关键修复：触发多个事件确保UI更新
+        // 触发SillyTavern的多个相关事件，确保UI和数据都更新
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
-            // 触发世界书设置更新
+            // 触发世界书设置更新事件
             eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
             
-            // 🔥 新增：触发聊天元数据更新（让ST保存聊天）
+            // 触发聊天变化事件，让ST保存聊天数据
             eventSource.emit(event_types.CHAT_CHANGED);
-            
-            // 🔥 新增：触发世界书列表刷新（让新世界书出现在下拉列表）
-            if (event_types.WORLDINFO_FORCE_ACTIVATE) {
-                eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, worldbookName);
-            }
-        }
-        
-        // 🔥 新增：如果有 world_info 模块，直接调用其刷新函数
-        if (typeof window.updateWorldInfoList === 'function') {
-            await window.updateWorldInfoList();
         }
         
         console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
+        console.log(`[角色日志] ✓ 已触发刷新事件，无需手动刷新页面`);
         return true;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
@@ -190,12 +184,23 @@ async function getTargetLorebookName() {
         try {
             await saveWorldInfo(worldbookName, newBookData, true);
             console.log(`[角色日志] ✓ 成功创建世界书: ${worldbookName}`);
+            
+            // 🔧 关键修复：创建后需要触发刷新，让UI显示新世界书
+            if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
+                // 触发世界书列表更新事件
+                eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE);
+            }
+            
+            // 延迟一下确保创建完成后再绑定
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
             toastr.success(`已自动创建世界书: ${worldbookName}`, '角色日志');
             
             // 自动绑定到聊天
             const bindSuccess = await bindWorldbookToChat(worldbookName);
             if (bindSuccess) {
                 console.log(`[角色日志] ✓ 已绑定到当前聊天`);
+                toastr.success(`已自动绑定到当前聊天`, '角色日志');
             }
         } catch (createError) {
             console.error(`[角色日志] ✗ 创建世界书失败:`, createError);
