@@ -112,87 +112,49 @@ async function bindWorldbookToChat(worldbookName) {
     const context = getContext();
     
     try {
-        console.log(`[角色日志] 尝试绑定世界书: ${worldbookName}`);
-        
-        // 方法1：直接操作 UI 下拉菜单（最可靠）
-        const worldInfoSelect = $('#world_info');
-        if (worldInfoSelect.length > 0) {
-            // 查找对应的 option
-            const targetOption = worldInfoSelect.find(`option`).filter(function() {
-                const optionText = $(this).text().trim();
-                const optionValue = $(this).val();
-                // 匹配显示文本或值
-                return optionText === worldbookName || optionValue === worldbookName || 
-                       optionText === worldbookName + '.json' || optionValue === worldbookName + '.json';
-            });
-            
-            if (targetOption.length > 0) {
-                const optionValue = targetOption.val();
-                worldInfoSelect.val(optionValue).trigger('change');
-                console.log(`[角色日志] ✓ 方法1成功: 通过UI选择器设置世界书`);
-                toastr.success(`已绑定世界书: ${worldbookName}`, '角色日志');
-                return true;
-            } else {
-                console.warn(`[角色日志] 方法1失败: 在下拉菜单中未找到 "${worldbookName}"`);
-            }
-        }
-        
-        // 方法2：使用 TavernHelper API
-        const worldbookFileName = worldbookName.endsWith('.json') ? worldbookName : `${worldbookName}.json`;
+        // 方法1：优先尝试使用TavernHelper API（如果存在）
         if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
-            try {
-                await TavernHelper.setChatLorebook(worldbookFileName);
-                console.log(`[角色日志] ✓ 方法2成功: TavernHelper.setChatLorebook`);
-                
-                // 强制刷新UI
-                if (worldInfoSelect.length > 0) {
-                    worldInfoSelect.trigger('change');
-                }
-                
-                toastr.success(`已绑定世界书: ${worldbookName}`, '角色日志');
-                return true;
-            } catch (helperError) {
-                console.warn(`[角色日志] 方法2失败: ${helperError.message}`);
-            }
+            await TavernHelper.setChatLorebook(worldbookName);
+            console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
+            return true;
         }
         
-        // 方法3：直接修改 chat_metadata 并强制保存
+        // 方法2：直接修改chat_metadata并触发保存
         if (!context.chat_metadata) {
             context.chat_metadata = {};
         }
         
         context.chat_metadata.world_info = worldbookName;
         
-        // 触发多个事件确保更新
+        // 🔧 关键修复：显式保存聊天以持久化绑定
+        // 方法2.1：尝试使用全局saveChat函数
+        if (typeof window.saveChat === 'function') {
+            await window.saveChat();
+            console.log(`[角色日志] ✓ 已保存聊天，世界书绑定已持久化: ${worldbookName}`);
+            return true;
+        }
+        
+        // 方法2.2：尝试使用SillyTavern内部的saveChatConditional
+        if (typeof window.saveChatConditional === 'function') {
+            await window.saveChatConditional();
+            console.log(`[角色日志] ✓ 已保存聊天（conditional），世界书绑定已持久化: ${worldbookName}`);
+            return true;
+        }
+        
+        // 方法2.3：触发世界书更新事件（作为后备）
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
             eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
-            eventSource.emit(event_types.CHAT_CHANGED, context.chatId);
+            console.log(`[角色日志] ⚠️ 已设置聊天世界书: ${worldbookName}`);
+            console.log(`[角色日志] ⚠️ 警告: 未找到保存函数，绑定可能需要手动保存聊天才能持久化`);
+            toastr.warning(`世界书已绑定，但需要手动保存聊天以持久化`, '角色日志', {timeOut: 5000});
+            return true;
         }
         
-        // 强制保存聊天
-        if (typeof saveChat === 'function') {
-            await saveChat();
-            console.log(`[角色日志] ✓ 方法3: 已保存聊天数据`);
-        }
-        
-        // 再次尝试更新UI
-        if (worldInfoSelect.length > 0) {
-            setTimeout(() => {
-                const optionToSelect = worldInfoSelect.find(`option`).filter(function() {
-                    return $(this).text().includes(worldbookName) || $(this).val().includes(worldbookName);
-                });
-                if (optionToSelect.length > 0) {
-                    worldInfoSelect.val(optionToSelect.val()).trigger('change');
-                }
-            }, 500);
-        }
-        
-        console.log(`[角色日志] ✓ 方法3: 已设置 chat_metadata.world_info = ${worldbookName}`);
-        toastr.warning(`已设置世界书，但UI可能需要手动刷新`, '角色日志');
+        console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
         return true;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
-        toastr.error(`绑定失败: ${error.message}`, '角色日志');
+        toastr.error(`绑定世界书失败: ${error.message}`, '角色日志');
         return false;
     }
 }
@@ -350,11 +312,16 @@ function getUnloggedMessages(startFloor, endFloor, characterName) {
     }).filter(m => m.content);
 }
 
+// 辅助函数：延迟执行
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // 调用AI生成日志（带重试机制）
 async function callAI(messages, retryCount = 0) {
     const settings = extension_settings[extensionName];
-    const MAX_RETRIES = 3; // 最大重试次数
-    const RETRY_DELAY = 2000; // 重试延迟（毫秒）
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [5000, 10000, 20000]; // 5秒、10秒、20秒
     
     console.log('[角色日志] callAI开始', retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : '');
     console.log('[角色日志] 是否使用自定义API:', !!settings.api.url);
@@ -401,14 +368,21 @@ async function callAI(messages, retryCount = 0) {
                 const errorText = await response.text();
                 console.error('[角色日志] API错误响应:', errorText);
                 
-                // 判断是否应该重试
-                const isRetryableError = response.status >= 500 || response.status === 429;
+                // 检查是否应该重试
+                const shouldRetry = retryCount < MAX_RETRIES && (
+                    response.status === 429 || // Too Many Requests
+                    response.status === 500 || // Internal Server Error
+                    response.status === 502 || // Bad Gateway
+                    response.status === 503 || // Service Unavailable
+                    response.status === 504    // Gateway Timeout
+                );
                 
-                if (isRetryableError && retryCount < MAX_RETRIES) {
-                    console.log(`[角色日志] 检测到可重试错误 (${response.status})，将在 ${RETRY_DELAY}ms 后重试...`);
-                    toastr.warning(`API请求失败 (${response.status})，${RETRY_DELAY / 1000}秒后自动重试 (${retryCount + 1}/${MAX_RETRIES})`, '角色日志');
+                if (shouldRetry) {
+                    const delay = RETRY_DELAYS[retryCount];
+                    console.log(`[角色日志] 第${retryCount + 1}次尝试失败(${response.status})，${delay/1000}秒后重试...`);
+                    toastr.warning(`API调用失败(${response.status})，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', {timeOut: delay});
                     
-                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                    await sleep(delay);
                     return await callAI(messages, retryCount + 1);
                 }
                 
@@ -426,32 +400,32 @@ async function callAI(messages, retryCount = 0) {
             const content = data.choices[0].message.content;
             console.log('[角色日志] 提取到内容长度:', content?.length || 0);
             
-            // 重试成功后提示
+            // 成功后提示（如果之前有重试）
             if (retryCount > 0) {
-                toastr.success(`API请求成功（第 ${retryCount + 1} 次尝试）`, '角色日志');
+                toastr.success(`API调用成功(经过${retryCount}次重试)`, '角色日志');
             }
             
             return content;
         } catch (error) {
-            console.error('[角色日志] API调用失败:', error);
-            console.error('[角色日志] 错误堆栈:', error.stack);
-            
-            // 网络错误也可以重试
-            const isNetworkError = error.message.includes('Failed to fetch') || 
-                                   error.message.includes('NetworkError') ||
-                                   error.message.includes('SSL');
+            // 网络错误也应该重试
+            const isNetworkError = error.message.includes('fetch') || 
+                                  error.message.includes('network') || 
+                                  error.message.includes('timeout');
             
             if (isNetworkError && retryCount < MAX_RETRIES) {
-                console.log(`[角色日志] 检测到网络错误，将在 ${RETRY_DELAY}ms 后重试...`);
-                toastr.warning(`网络错误，${RETRY_DELAY / 1000}秒后自动重试 (${retryCount + 1}/${MAX_RETRIES})`, '角色日志');
+                const delay = RETRY_DELAYS[retryCount];
+                console.log(`[角色日志] 网络错误，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`);
+                toastr.warning(`网络错误，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', {timeOut: delay});
                 
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                await sleep(delay);
                 return await callAI(messages, retryCount + 1);
             }
             
-            // 达到最大重试次数或不可重试的错误
+            console.error('[角色日志] API调用失败:', error);
+            console.error('[角色日志] 错误堆栈:', error.stack);
+            
             if (retryCount >= MAX_RETRIES) {
-                toastr.error(`API调用失败: 已达到最大重试次数 (${MAX_RETRIES})`, '角色日志');
+                toastr.error(`API调用失败(已重试${MAX_RETRIES}次): ${error.message}`, '角色日志');
             } else {
                 toastr.error(`API调用失败: ${error.message}`, '角色日志');
             }
@@ -477,19 +451,19 @@ async function callAI(messages, retryCount = 0) {
         console.log('[角色日志] generateRaw返回结果长度:', result?.length || 0);
         return result;
     } catch (error) {
-        console.error('[角色日志] 调用ST API失败:', error);
-        console.error('[角色日志] 错误堆栈:', error.stack);
-        
-        // ST API也支持重试
+        // ST API也应该支持重试
         if (retryCount < MAX_RETRIES) {
-            console.log(`[角色日志] ST API调用失败，将在 ${RETRY_DELAY}ms 后重试...`);
-            toastr.warning(`生成失败，${RETRY_DELAY / 1000}秒后自动重试 (${retryCount + 1}/${MAX_RETRIES})`, '角色日志');
+            const delay = RETRY_DELAYS[retryCount];
+            console.log(`[角色日志] ST API错误，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`);
+            toastr.warning(`生成失败，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', {timeOut: delay});
             
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            await sleep(delay);
             return await callAI(messages, retryCount + 1);
         }
         
-        toastr.error(`生成日志失败: ${error.message}`, '角色日志');
+        console.error('[角色日志] 调用ST API失败:', error);
+        console.error('[角色日志] 错误堆栈:', error.stack);
+        toastr.error(`生成日志失败(已重试${MAX_RETRIES}次): ${error.message}`, '角色日志');
         return null;
     }
 }
@@ -1177,14 +1151,6 @@ async function executeJournalUpdate() {
         if (failedRanges.length > 0) {
             await showRetryDialog(failedRanges, 'manual');
         } else if (totalSuccessCount > 0) {
-            // ✅ 修复：更新成功后，确保世界书已绑定到聊天
-            console.log('[角色日志] 确保世界书已绑定到聊天...');
-            const bindSuccess = await bindWorldbookToChat(lorebookName);
-            if (bindSuccess) {
-                console.log('[角色日志] ✓ 世界书已绑定到当前聊天');
-                toastr.info('世界书已绑定到聊天', '角色日志');
-            }
-            
             toastr.success(`成功更新了 ${totalSuccessCount} 个角色的日志`, '角色日志');
             await updateStatus();
             return true;
@@ -2111,13 +2077,6 @@ async function executeBatchUpdate(startFloor, endFloor) {
     
     console.log('[角色日志] 批量更新全部完成');
     console.log('[角色日志] ===================================');
-    
-    // ✅ 修复：批量更新成功后，确保世界书已绑定到聊天
-    console.log('[角色日志] 确保世界书已绑定到聊天...');
-    const bindSuccess = await bindWorldbookToChat(lorebookName);
-    if (bindSuccess) {
-        console.log('[角色日志] ✓ 世界书已绑定到当前聊天');
-    }
 }
 
 // 🎯 显示重试对话框
