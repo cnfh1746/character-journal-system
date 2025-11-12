@@ -112,26 +112,28 @@ async function bindWorldbookToChat(worldbookName) {
     const context = getContext();
     
     try {
-        // 设置聊天元数据中的世界书
+        // 方法1：优先尝试使用TavernHelper API（如果存在）
+        if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
+            await TavernHelper.setChatLorebook(worldbookName);
+            console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
+            return true;
+        }
+        
+        // 方法2：直接修改chat_metadata并触发保存
         if (!context.chat_metadata) {
             context.chat_metadata = {};
         }
         
         context.chat_metadata.world_info = worldbookName;
         
-        // 保存聊天元数据
-        await fetch('/api/chats/save', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                chat_id: context.chatId,
-                metadata: context.chat_metadata
-            })
-        });
+        // 触发SillyTavern的聊天保存机制
+        // 使用eventSource触发CHAT_CHANGED事件，让ST自动保存
+        if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
+            eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+        }
         
-        console.log(`[角色日志] 已将世界书 "${worldbookName}" 绑定到当前聊天`);
+        console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
+        console.log(`[角色日志] 提示: 请确保保存当前聊天以持久化此设置`);
         return true;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
@@ -2361,19 +2363,15 @@ jQuery(async () => {
             const newCharName = context.name2 || "角色";
             console.log(`[角色日志] 新角色: ${newCharName}`);
             
-            // 自动切换世界书（这会触发创建和绑定）
+            // 自动切换世界书
             const newWorldbook = await getTargetLorebookName();
             console.log(`[角色日志] 切换到世界书: ${newWorldbook}`);
-            
-            // 确保绑定到当前聊天
-            await bindWorldbookToChat(newWorldbook);
-            console.log(`[角色日志] 已绑定世界书到当前聊天`);
             console.log('[角色日志] =====================================');
             
             // 刷新状态显示
             await updateStatus();
             
-            toastr.success(`已切换到世界书: ${newWorldbook}`, '角色日志');
+            toastr.info(`已加载 ${newWorldbook}`, '角色日志');
         }
     });
     
