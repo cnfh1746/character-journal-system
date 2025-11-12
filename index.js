@@ -128,26 +128,20 @@ async function getTargetLorebookName() {
     
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
     
-    // 🔍 调试：读取所有世界书列表
+    // 🔧 核心修复：直接用 world_names 列表判断是否存在
     try {
         const { world_names } = await import('/scripts/world-info.js');
         const allWorldbooks = world_names ? world_names.map(f => f.replace('.json', '')) : [];
+        const worldbookExists = allWorldbooks.includes(worldbookName);
+        
         console.log('[角色日志] 当前所有世界书:', allWorldbooks);
-        console.log(`[角色日志] ${worldbookName} 是否存在:`, allWorldbooks.includes(worldbookName));
-    } catch (listError) {
-        console.log('[角色日志] 无法读取世界书列表');
-    }
-    
-    // 🔧 关键修复：检查世界书是否真实存在
-    // loadWorldInfo 不会抛出错误，需要检查返回的数据是否有效
-    try {
-        const bookData = await loadWorldInfo(worldbookName);
+        console.log(`[角色日志] ${worldbookName} 是否存在:`, worldbookExists);
         
-        // 判断世界书是否真实存在：检查是否有 entries 属性且不为 null
-        const isRealBook = bookData && bookData.entries !== undefined && bookData.entries !== null;
-        
-        if (isRealBook) {
-            console.log(`[角色日志] ✓ 找到世界书: ${worldbookName} (entries数量: ${Object.keys(bookData.entries).length})`);
+        if (worldbookExists) {
+            // 世界书真实存在
+            const bookData = await loadWorldInfo(worldbookName);
+            const entriesCount = bookData?.entries ? Object.keys(bookData.entries).length : 0;
+            console.log(`[角色日志] ✓ 找到世界书: ${worldbookName} (entries数量: ${entriesCount})`);
         } else {
             // 世界书不存在，创建新文件
             console.log(`[角色日志] ✗ 世界书不存在（返回了无效数据），开始创建: ${worldbookName}`);
