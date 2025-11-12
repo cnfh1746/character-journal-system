@@ -138,13 +138,35 @@ async function getTargetLorebookName() {
         console.log(`[角色日志] ${worldbookName} 是否存在:`, worldbookExists);
         
         if (worldbookExists) {
-            // 世界书真实存在
+            // 世界书真实存在，检查是否已绑定
             const bookData = await loadWorldInfo(worldbookName);
             const entriesCount = bookData?.entries ? Object.keys(bookData.entries).length : 0;
             console.log(`[角色日志] ✓ 找到世界书: ${worldbookName} (entries数量: ${entriesCount})`);
+            
+            // 🔧 关键修复：检查是否已绑定，如果未绑定则自动绑定
+            const currentBoundBook = context.chat_metadata?.world_info;
+            if (currentBoundBook !== worldbookName) {
+                console.log(`[角色日志] 世界书存在但未绑定，当前绑定: ${currentBoundBook || 'None'}`);
+                console.log(`[角色日志] 正在自动绑定到: ${worldbookName}`);
+                
+                if (context.chat_metadata) {
+                    context.chat_metadata.world_info = worldbookName;
+                    await context.saveMetadata();
+                    console.log(`[角色日志] ✓ 世界书已自动绑定到聊天`);
+                    toastr.success(`已自动绑定世界书: ${worldbookName}`, '角色日志');
+                    
+                    // 触发UI刷新
+                    if (eventSource && event_types) {
+                        eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+                        console.log('[角色日志] ✓ 已触发 WORLDINFO_SETTINGS_UPDATED 事件');
+                    }
+                }
+            } else {
+                console.log(`[角色日志] ✓ 世界书已正确绑定到当前聊天`);
+            }
         } else {
             // 世界书不存在，创建新文件
-            console.log(`[角色日志] ✗ 世界书不存在（返回了无效数据），开始创建: ${worldbookName}`);
+            console.log(`[角色日志] ✗ 世界书不存在，开始创建: ${worldbookName}`);
             
             try {
                 // 直接创建世界书文件
@@ -156,6 +178,9 @@ async function getTargetLorebookName() {
                 // 使用 saveWorldInfo 创建新文件（第三个参数true表示创建新文件）
                 await saveWorldInfo(worldbookName, newBookData, true);
                 console.log(`[角色日志] ✓ 世界书文件已创建: ${worldbookName}`);
+                
+                // 🔧 关键修复：使用延迟确保文件系统操作完成
+                await new Promise(resolve => setTimeout(resolve, 100));
                 
                 // 绑定到当前聊天
                 if (context.chat_metadata) {
