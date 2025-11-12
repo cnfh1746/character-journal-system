@@ -128,6 +128,16 @@ async function getTargetLorebookName() {
     
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
     
+    // 🔍 调试：读取所有世界书列表
+    try {
+        const { world_names } = await import('/scripts/world-info.js');
+        const allWorldbooks = world_names ? world_names.map(f => f.replace('.json', '')) : [];
+        console.log('[角色日志] 当前所有世界书:', allWorldbooks);
+        console.log(`[角色日志] ${worldbookName} 是否存在:`, allWorldbooks.includes(worldbookName));
+    } catch (listError) {
+        console.log('[角色日志] 无法读取世界书列表');
+    }
+    
     // 🔧 关键修复：检查世界书是否真实存在
     // loadWorldInfo 不会抛出错误，需要检查返回的数据是否有效
     try {
