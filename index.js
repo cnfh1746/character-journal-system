@@ -2362,6 +2362,22 @@ jQuery(async () => {
     setupUIHandlers();
     
     // 监听聊天消息事件
+    console.log('[角色日志] ========== 调试信息 ==========');
+    console.log('[角色日志] eventSource 类型:', typeof eventSource);
+    console.log('[角色日志] eventSource 值:', eventSource);
+    console.log('[角色日志] event_types 类型:', typeof event_types);
+    console.log('[角色日志] event_types.MESSAGE_RECEIVED:', event_types?.MESSAGE_RECEIVED);
+    console.log('[角色日志] event_types.CHARACTER_SELECTED:', event_types?.CHARACTER_SELECTED);
+    console.log('[角色日志] ====================================');
+    
+    if (!eventSource || !event_types) {
+        console.error('[角色日志] ❌ 事件系统导入失败！');
+        console.error('[角色日志] eventSource:', eventSource);
+        console.error('[角色日志] event_types:', event_types);
+        toastr.error('角色日志系统：事件系统导入失败', '扩展错误');
+        return;
+    }
+    
     console.log('[角色日志] ✓ 开始注册事件监听器');
         
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
