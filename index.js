@@ -133,23 +133,37 @@ async function getTargetLorebookName() {
         await loadWorldInfo(worldbookName);
         console.log(`[角色日志] ✓ 找到世界书: ${worldbookName}`);
     } catch (error) {
-        // 世界书不存在，让 TavernHelper 来处理创建和绑定
-        console.log(`[角色日志] ✗ 世界书不存在，调用 TavernHelper.getOrCreateChatLorebook 创建并绑定: ${worldbookName}`);
+        // 世界书不存在，直接创建文件
+        console.log(`[角色日志] ✗ 世界书不存在，开始创建: ${worldbookName}`);
         try {
-            // 【核心修改】一步到位，创建、绑定、刷新UI
-            await TavernHelper.getOrCreateChatLorebook(worldbookName);
+            // 【核心修改】直接创建世界书文件，不依赖TavernHelper
+            const newBookData = {
+                name: worldbookName,
+                entries: {}
+            };
             
-            console.log(`[角色日志] ✓ 成功创建并绑定世界书: ${worldbookName}`);
+            // 使用 saveWorldInfo 创建新文件（第三个参数true表示创建新文件）
+            await saveWorldInfo(worldbookName, newBookData, true);
+            console.log(`[角色日志] ✓ 世界书文件已创建: ${worldbookName}`);
+            
+            // 绑定到当前聊天
+            const context = getContext();
+            if (context.chat_metadata) {
+                context.chat_metadata.world_info = worldbookName;
+                await context.saveMetadata();
+                console.log(`[角色日志] ✓ 世界书已绑定到聊天`);
+            }
+            
             toastr.success(`已自动创建并绑定世界书: ${worldbookName}`, '角色日志');
-
-            // 【关键】在TavernHelper操作后，手动刷新一下列表以确保万无一失
-            if (SillyTavern.worldInfo && typeof SillyTavern.worldInfo.refreshWorldInfoList === 'function') {
-                await SillyTavern.worldInfo.refreshWorldInfoList();
-                console.log('[角色日志] ✓ 已调用 worldInfo.refreshWorldInfoList() 刷新列表');
+            
+            // 触发UI刷新
+            if (eventSource && event_types) {
+                eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+                console.log('[角色日志] ✓ 已触发 WORLDINFO_SETTINGS_UPDATED 事件');
             }
 
         } catch (createError) {
-            console.error(`[角色日志] ✗ 使用 TavernHelper 创建/绑定世界书失败:`, createError);
+            console.error(`[角色日志] ✗ 创建/绑定世界书失败:`, createError);
             toastr.error(`创建/绑定世界书失败: ${createError.message}`, '角色日志');
         }
     }
