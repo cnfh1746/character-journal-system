@@ -2361,15 +2361,19 @@ jQuery(async () => {
             const newCharName = context.name2 || "角色";
             console.log(`[角色日志] 新角色: ${newCharName}`);
             
-            // 自动切换世界书
+            // 自动切换世界书（这会触发创建和绑定）
             const newWorldbook = await getTargetLorebookName();
             console.log(`[角色日志] 切换到世界书: ${newWorldbook}`);
+            
+            // 确保绑定到当前聊天
+            await bindWorldbookToChat(newWorldbook);
+            console.log(`[角色日志] 已绑定世界书到当前聊天`);
             console.log('[角色日志] =====================================');
             
             // 刷新状态显示
             await updateStatus();
             
-            toastr.info(`已加载 ${newWorldbook}`, '角色日志');
+            toastr.success(`已切换到世界书: ${newWorldbook}`, '角色日志');
         }
     });
     
