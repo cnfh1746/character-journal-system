@@ -7,7 +7,10 @@ import {
     createWorldInfoEntry
 } from "../../../world-info.js";
 import { characters } from "../../../../script.js";
-import { eventSource, event_types } from "../../../../script.js";
+
+// 从全局对象获取事件系统（避免导入问题）
+const getEventSource = () => window.eventSource || window.SillyTavern?.eventSource;
+const getEventTypes = () => window.event_types || window.SillyTavern?.event_types;
 
 const extensionName = "character-journal-system";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
@@ -2362,25 +2365,37 @@ jQuery(async () => {
     // 设置事件监听
     setupUIHandlers();
     
-    // 监听聊天消息事件
-    eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
-        const settings = extension_settings[extensionName];
-        if (settings.enabled) {
-            updateStatus();
-            
-            // 自动更新功能
-            if (settings.autoUpdate) {
-                await checkAndAutoUpdate();
-            }
+    // 监听聊天消息事件（使用延迟初始化确保事件系统已加载）
+    const initEventListeners = () => {
+        const eventSource = getEventSource();
+        const event_types = getEventTypes();
+        
+        if (!eventSource || !event_types) {
+            console.warn('[角色日志] 事件系统未就绪，2秒后重试...');
+            setTimeout(initEventListeners, 2000);
+            return;
         }
-    });
-    
-    eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
-        updateStatus();
-    });
-    
-    // 监听角色切换事件
-    eventSource.on(event_types.CHARACTER_SELECTED, async () => {
+        
+        console.log('[角色日志] ✓ 事件系统已就绪，注册事件监听器');
+        
+        eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
+            const settings = extension_settings[extensionName];
+            if (settings.enabled) {
+                updateStatus();
+                
+                // 自动更新功能
+                if (settings.autoUpdate) {
+                    await checkAndAutoUpdate();
+                }
+            }
+        });
+        
+        eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
+            updateStatus();
+        });
+        
+        // 监听角色切换事件
+        eventSource.on(event_types.CHARACTER_SELECTED, async () => {
         try {
             console.log('[角色日志] ========== 🔔 CHARACTER_SELECTED 事件触发 ==========');
             
@@ -2415,7 +2430,11 @@ jQuery(async () => {
             console.error('[角色日志] ❌ CHARACTER_SELECTED 事件处理失败:', error);
             console.error('[角色日志] 错误堆栈:', error.stack);
         }
-    });
+        });
+    };
+    
+    // 延迟初始化事件监听器
+    initEventListeners();
     
     console.log('[角色日志系统] 扩展已加载');
     
