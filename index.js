@@ -107,37 +107,6 @@ const defaultSettings = {
     }
 };
 
-// 自动绑定世界书到聊天
-async function bindWorldbookToChat(worldbookName) {
-    const context = getContext();
-    
-    try {
-        // 🔧 修复：直接调用 saveMetadata 强制保存
-        if (!context.chat_metadata) {
-            context.chat_metadata = {};
-        }
-        
-        context.chat_metadata.world_info = worldbookName;
-        
-        // 使用 saveMetadata() 强制持久化到文件
-        if (typeof saveMetadata !== 'undefined') {
-            await saveMetadata();
-            console.log(`[角色日志] ✓ 已绑定世界书并保存: ${worldbookName}`);
-        } else {
-            console.warn(`[角色日志] ⚠️ saveMetadata 不可用，可能无法持久化`);
-        }
-        
-        // 触发界面刷新
-        if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
-            eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
-        }
-        
-        return true;
-    } catch (error) {
-        console.error('[角色日志] 绑定世界书失败:', error);
-        return false;
-    }
-}
 
 // 获取目标世界书名称（智能切换版）
 async function getTargetLorebookName() {
@@ -165,27 +134,24 @@ async function getTargetLorebookName() {
         await loadWorldInfo(worldbookName);
         console.log(`[角色日志] ✓ 找到世界书: ${worldbookName}`);
     } catch (error) {
-        // 世界书不存在，自动创建
-        console.log(`[角色日志] ✗ 世界书不存在，开始自动创建: ${worldbookName}`);
-        
-        const newBookData = {
-            entries: {},
-            name: worldbookName
-        };
-        
+        // 世界书不存在，让 TavernHelper 来处理创建和绑定
+        console.log(`[角色日志] ✗ 世界书不存在，调用 TavernHelper.getOrCreateChatLorebook 创建并绑定: ${worldbookName}`);
         try {
-            await saveWorldInfo(worldbookName, newBookData, true);
-            console.log(`[角色日志] ✓ 成功创建世界书: ${worldbookName}`);
-            toastr.success(`已自动创建世界书: ${worldbookName}`, '角色日志');
+            // 【核心修改】一步到位，创建、绑定、刷新UI
+            await TavernHelper.getOrCreateChatLorebook(worldbookName);
             
-            // 自动绑定到聊天
-            const bindSuccess = await bindWorldbookToChat(worldbookName);
-            if (bindSuccess) {
-                console.log(`[角色日志] ✓ 已绑定到当前聊天`);
+            console.log(`[角色日志] ✓ 成功创建并绑定世界书: ${worldbookName}`);
+            toastr.success(`已自动创建并绑定世界书: ${worldbookName}`, '角色日志');
+
+            // 【关键】在TavernHelper操作后，手动刷新一下列表以确保万无一失
+            if (SillyTavern.worldInfo && typeof SillyTavern.worldInfo.refreshWorldInfoList === 'function') {
+                await SillyTavern.worldInfo.refreshWorldInfoList();
+                console.log('[角色日志] ✓ 已调用 worldInfo.refreshWorldInfoList() 刷新列表');
             }
+
         } catch (createError) {
-            console.error(`[角色日志] ✗ 创建世界书失败:`, createError);
-            toastr.error(`创建世界书失败: ${createError.message}`, '角色日志');
+            console.error(`[角色日志] ✗ 使用 TavernHelper 创建/绑定世界书失败:`, createError);
+            toastr.error(`创建/绑定世界书失败: ${createError.message}`, '角色日志');
         }
     }
     
@@ -2426,21 +2392,12 @@ jQuery(async () => {
             // 自动切换世界书
             const newWorldbook = await getTargetLorebookName();
             console.log(`[角色日志] 切换到世界书: ${newWorldbook}`);
-            
-            // 🔧 修复：角色切换时自动绑定世界书
-            const bindSuccess = await bindWorldbookToChat(newWorldbook);
-            if (bindSuccess) {
-                console.log(`[角色日志] ✓ 已自动绑定世界书到当前聊天`);
-                toastr.success(`已自动绑定世界书: ${newWorldbook}`, '角色日志');
-            } else {
-                console.warn(`[角色日志] ⚠️ 绑定世界书失败`);
-                toastr.warning(`世界书绑定失败，请手动绑定`, '角色日志');
-            }
-            
             console.log('[角色日志] =====================================');
             
             // 刷新状态显示
             await updateStatus();
+            
+            toastr.info(`已加载 ${newWorldbook}`, '角色日志');
         }
     });
     
