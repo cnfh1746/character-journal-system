@@ -112,42 +112,87 @@ async function bindWorldbookToChat(worldbookName) {
     const context = getContext();
     
     try {
-        // 🔧 关键修复：TavernHelper需要文件名（xxx.json），而不是显示名称
-        // 我们需要将显示名称转换为文件名
-        const worldbookFileName = worldbookName.endsWith('.json') ? worldbookName : `${worldbookName}.json`;
+        console.log(`[角色日志] 尝试绑定世界书: ${worldbookName}`);
         
-        console.log(`[角色日志] 尝试绑定世界书: ${worldbookName} -> ${worldbookFileName}`);
-        
-        // 方法1：优先尝试使用TavernHelper API（如果存在）
-        if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
-            try {
-                await TavernHelper.setChatLorebook(worldbookFileName);
-                console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookFileName}`);
+        // 方法1：直接操作 UI 下拉菜单（最可靠）
+        const worldInfoSelect = $('#world_info');
+        if (worldInfoSelect.length > 0) {
+            // 查找对应的 option
+            const targetOption = worldInfoSelect.find(`option`).filter(function() {
+                const optionText = $(this).text().trim();
+                const optionValue = $(this).val();
+                // 匹配显示文本或值
+                return optionText === worldbookName || optionValue === worldbookName || 
+                       optionText === worldbookName + '.json' || optionValue === worldbookName + '.json';
+            });
+            
+            if (targetOption.length > 0) {
+                const optionValue = targetOption.val();
+                worldInfoSelect.val(optionValue).trigger('change');
+                console.log(`[角色日志] ✓ 方法1成功: 通过UI选择器设置世界书`);
+                toastr.success(`已绑定世界书: ${worldbookName}`, '角色日志');
                 return true;
-            } catch (helperError) {
-                console.warn(`[角色日志] TavernHelper绑定失败: ${helperError.message}，尝试方法2`);
-                // 如果TavernHelper失败，继续尝试方法2
+            } else {
+                console.warn(`[角色日志] 方法1失败: 在下拉菜单中未找到 "${worldbookName}"`);
             }
         }
         
-        // 方法2：直接修改chat_metadata并触发保存
+        // 方法2：使用 TavernHelper API
+        const worldbookFileName = worldbookName.endsWith('.json') ? worldbookName : `${worldbookName}.json`;
+        if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
+            try {
+                await TavernHelper.setChatLorebook(worldbookFileName);
+                console.log(`[角色日志] ✓ 方法2成功: TavernHelper.setChatLorebook`);
+                
+                // 强制刷新UI
+                if (worldInfoSelect.length > 0) {
+                    worldInfoSelect.trigger('change');
+                }
+                
+                toastr.success(`已绑定世界书: ${worldbookName}`, '角色日志');
+                return true;
+            } catch (helperError) {
+                console.warn(`[角色日志] 方法2失败: ${helperError.message}`);
+            }
+        }
+        
+        // 方法3：直接修改 chat_metadata 并强制保存
         if (!context.chat_metadata) {
             context.chat_metadata = {};
         }
         
-        // 直接使用显示名称（不带.json）
         context.chat_metadata.world_info = worldbookName;
         
-        // 触发SillyTavern的聊天保存机制
+        // 触发多个事件确保更新
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
             eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+            eventSource.emit(event_types.CHAT_CHANGED, context.chatId);
         }
         
-        console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
-        console.log(`[角色日志] 提示: 请手动保存当前聊天以持久化此设置`);
+        // 强制保存聊天
+        if (typeof saveChat === 'function') {
+            await saveChat();
+            console.log(`[角色日志] ✓ 方法3: 已保存聊天数据`);
+        }
+        
+        // 再次尝试更新UI
+        if (worldInfoSelect.length > 0) {
+            setTimeout(() => {
+                const optionToSelect = worldInfoSelect.find(`option`).filter(function() {
+                    return $(this).text().includes(worldbookName) || $(this).val().includes(worldbookName);
+                });
+                if (optionToSelect.length > 0) {
+                    worldInfoSelect.val(optionToSelect.val()).trigger('change');
+                }
+            }, 500);
+        }
+        
+        console.log(`[角色日志] ✓ 方法3: 已设置 chat_metadata.world_info = ${worldbookName}`);
+        toastr.warning(`已设置世界书，但UI可能需要手动刷新`, '角色日志');
         return true;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
+        toastr.error(`绑定失败: ${error.message}`, '角色日志');
         return false;
     }
 }
