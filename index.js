@@ -107,51 +107,45 @@ const defaultSettings = {
     }
 };
 
-// 自动绑定世界书到聊天
+// 自动绑定世界书到聊天（通过操作UI实现）
 async function bindWorldbookToChat(worldbookName) {
-    const context = getContext();
-    
     try {
-        // 方法1：优先尝试使用TavernHelper API（如果存在）
-        if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
-            await TavernHelper.setChatLorebook(worldbookName);
-            console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
+        console.log(`[角色日志] 尝试绑定世界书到聊天: ${worldbookName}`);
+        
+        // 方法1：查找聊天知识书的下拉框并设置值（正确的选择器）
+        const chatLorebookSelect = $('.chat_world_info_selector');
+        
+        if (chatLorebookSelect.length > 0) {
+            console.log('[角色日志] 找到聊天知识书下拉框 (.chat_world_info_selector)');
+            
+            // 设置下拉框的值
+            chatLorebookSelect.val(worldbookName);
+            
+            // 触发change事件，让ST保存设置
+            chatLorebookSelect.trigger('change');
+            
+            console.log(`[角色日志] ✓ 已通过UI绑定世界书: ${worldbookName}`);
+            toastr.success(`已自动绑定聊天知识书: ${worldbookName}`, '角色日志');
             return true;
         }
         
-        // 方法2：直接修改chat_metadata并触发保存
+        // 方法2：如果UI元素不存在，尝试直接修改metadata
+        const context = getContext();
         if (!context.chat_metadata) {
             context.chat_metadata = {};
         }
         
         context.chat_metadata.world_info = worldbookName;
         
-        // 🔧 关键修复：显式保存聊天以持久化绑定
-        // 方法2.1：尝试使用全局saveChat函数
-        if (typeof window.saveChat === 'function') {
-            await window.saveChat();
-            console.log(`[角色日志] ✓ 已保存聊天，世界书绑定已持久化: ${worldbookName}`);
-            return true;
-        }
-        
-        // 方法2.2：尝试使用SillyTavern内部的saveChatConditional
-        if (typeof window.saveChatConditional === 'function') {
-            await window.saveChatConditional();
-            console.log(`[角色日志] ✓ 已保存聊天（conditional），世界书绑定已持久化: ${worldbookName}`);
-            return true;
-        }
-        
-        // 方法2.3：触发世界书更新事件（作为后备）
+        // 触发保存
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
-            eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
-            console.log(`[角色日志] ⚠️ 已设置聊天世界书: ${worldbookName}`);
-            console.log(`[角色日志] ⚠️ 警告: 未找到保存函数，绑定可能需要手动保存聊天才能持久化`);
-            toastr.warning(`世界书已绑定，但需要手动保存聊天以持久化`, '角色日志', {timeOut: 5000});
-            return true;
+            eventSource.emit(event_types.CHAT_CHANGED);
         }
         
-        console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
+        console.log(`[角色日志] ✓ 已设置chat_metadata.world_info: ${worldbookName}`);
+        toastr.info(`已设置聊天知识书（请手动刷新确认）: ${worldbookName}`, '角色日志');
         return true;
+        
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
         toastr.error(`绑定世界书失败: ${error.message}`, '角色日志');
