@@ -2381,23 +2381,39 @@ jQuery(async () => {
     
     // 监听角色切换事件
     eventSource.on(event_types.CHARACTER_SELECTED, async () => {
-        const settings = extension_settings[extensionName];
-        if (settings.enabled && settings.target === "character_main") {
-            console.log('[角色日志] ========== 检测到角色切换 ==========');
+        try {
+            console.log('[角色日志] ========== 🔔 CHARACTER_SELECTED 事件触发 ==========');
             
-            const context = getContext();
-            const newCharName = context.name2 || "角色";
-            console.log(`[角色日志] 新角色: ${newCharName}`);
+            const settings = extension_settings[extensionName];
+            console.log('[角色日志] 功能启用状态:', settings?.enabled);
+            console.log('[角色日志] 目标模式:', settings?.target);
             
-            // 自动切换世界书
-            const newWorldbook = await getTargetLorebookName();
-            console.log(`[角色日志] 切换到世界书: ${newWorldbook}`);
-            console.log('[角色日志] =====================================');
+            if (settings.enabled && settings.target === "character_main") {
+                const context = getContext();
+                const newCharName = context.name2 || "角色";
+                console.log(`[角色日志] 新角色: ${newCharName}`);
+                
+                // 自动切换世界书
+                try {
+                    const newWorldbook = await getTargetLorebookName();
+                    console.log(`[角色日志] ✓ 成功切换到世界书: ${newWorldbook}`);
+                    
+                    // 刷新状态显示
+                    await updateStatus();
+                    
+                    toastr.info(`已加载 ${newWorldbook}`, '角色日志');
+                } catch (wbError) {
+                    console.error('[角色日志] ✗ 切换世界书失败:', wbError);
+                    console.error('[角色日志] 错误堆栈:', wbError.stack);
+                }
+            } else {
+                console.log('[角色日志] 跳过角色切换处理（功能未启用或不在character_main模式）');
+            }
             
-            // 刷新状态显示
-            await updateStatus();
-            
-            toastr.info(`已加载 ${newWorldbook}`, '角色日志');
+            console.log('[角色日志] ========================================');
+        } catch (error) {
+            console.error('[角色日志] ❌ CHARACTER_SELECTED 事件处理失败:', error);
+            console.error('[角色日志] 错误堆栈:', error.stack);
         }
     });
     
