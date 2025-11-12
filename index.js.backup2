@@ -112,26 +112,28 @@ async function bindWorldbookToChat(worldbookName) {
     const context = getContext();
     
     try {
-        // 🔧 修复：直接调用 saveMetadata 强制保存
+        // 方法1：优先尝试使用TavernHelper API（如果存在）
+        if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
+            await TavernHelper.setChatLorebook(worldbookName);
+            console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
+            return true;
+        }
+        
+        // 方法2：直接修改chat_metadata并触发保存
         if (!context.chat_metadata) {
             context.chat_metadata = {};
         }
         
         context.chat_metadata.world_info = worldbookName;
         
-        // 使用 saveMetadata() 强制持久化到文件
-        if (typeof saveMetadata !== 'undefined') {
-            await saveMetadata();
-            console.log(`[角色日志] ✓ 已绑定世界书并保存: ${worldbookName}`);
-        } else {
-            console.warn(`[角色日志] ⚠️ saveMetadata 不可用，可能无法持久化`);
-        }
-        
-        // 触发界面刷新
+        // 触发SillyTavern的聊天保存机制
+        // 使用eventSource触发CHAT_CHANGED事件，让ST自动保存
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
             eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
         }
         
+        console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
+        console.log(`[角色日志] 提示: 请确保保存当前聊天以持久化此设置`);
         return true;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
@@ -2426,21 +2428,12 @@ jQuery(async () => {
             // 自动切换世界书
             const newWorldbook = await getTargetLorebookName();
             console.log(`[角色日志] 切换到世界书: ${newWorldbook}`);
-            
-            // 🔧 修复：角色切换时自动绑定世界书
-            const bindSuccess = await bindWorldbookToChat(newWorldbook);
-            if (bindSuccess) {
-                console.log(`[角色日志] ✓ 已自动绑定世界书到当前聊天`);
-                toastr.success(`已自动绑定世界书: ${newWorldbook}`, '角色日志');
-            } else {
-                console.warn(`[角色日志] ⚠️ 绑定世界书失败`);
-                toastr.warning(`世界书绑定失败，请手动绑定`, '角色日志');
-            }
-            
             console.log('[角色日志] =====================================');
             
             // 刷新状态显示
             await updateStatus();
+            
+            toastr.info(`已加载 ${newWorldbook}`, '角色日志');
         }
     });
     
