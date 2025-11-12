@@ -128,26 +128,64 @@ async function getTargetLorebookName() {
     
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
     
-    // 检查世界书是否存在
+    // 🔧 关键修复：检查世界书是否真实存在
+    // loadWorldInfo 不会抛出错误，需要检查返回的数据是否有效
     try {
-        await loadWorldInfo(worldbookName);
-        console.log(`[角色日志] ✓ 找到世界书: ${worldbookName}`);
+        const bookData = await loadWorldInfo(worldbookName);
+        
+        // 判断世界书是否真实存在：检查是否有 entries 属性且不为 null
+        const isRealBook = bookData && bookData.entries !== undefined && bookData.entries !== null;
+        
+        if (isRealBook) {
+            console.log(`[角色日志] ✓ 找到世界书: ${worldbookName} (entries数量: ${Object.keys(bookData.entries).length})`);
+        } else {
+            // 世界书不存在，创建新文件
+            console.log(`[角色日志] ✗ 世界书不存在（返回了无效数据），开始创建: ${worldbookName}`);
+            
+            try {
+                // 直接创建世界书文件
+                const newBookData = {
+                    name: worldbookName,
+                    entries: {}
+                };
+                
+                // 使用 saveWorldInfo 创建新文件（第三个参数true表示创建新文件）
+                await saveWorldInfo(worldbookName, newBookData, true);
+                console.log(`[角色日志] ✓ 世界书文件已创建: ${worldbookName}`);
+                
+                // 绑定到当前聊天
+                if (context.chat_metadata) {
+                    context.chat_metadata.world_info = worldbookName;
+                    await context.saveMetadata();
+                    console.log(`[角色日志] ✓ 世界书已绑定到聊天`);
+                }
+                
+                toastr.success(`已自动创建并绑定世界书: ${worldbookName}`, '角色日志');
+                
+                // 触发UI刷新
+                if (eventSource && event_types) {
+                    eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+                    console.log('[角色日志] ✓ 已触发 WORLDINFO_SETTINGS_UPDATED 事件');
+                }
+            } catch (createError) {
+                console.error(`[角色日志] ✗ 创建/绑定世界书失败:`, createError);
+                toastr.error(`创建/绑定世界书失败: ${createError.message}`, '角色日志');
+            }
+        }
     } catch (error) {
-        // 世界书不存在，直接创建文件
-        console.log(`[角色日志] ✗ 世界书不存在，开始创建: ${worldbookName}`);
+        // 如果 loadWorldInfo 真的抛出错误（极少情况）
+        console.error(`[角色日志] ✗ 加载世界书时出错:`, error);
+        console.log(`[角色日志] 尝试创建世界书: ${worldbookName}`);
+        
         try {
-            // 【核心修改】直接创建世界书文件，不依赖TavernHelper
             const newBookData = {
                 name: worldbookName,
                 entries: {}
             };
             
-            // 使用 saveWorldInfo 创建新文件（第三个参数true表示创建新文件）
             await saveWorldInfo(worldbookName, newBookData, true);
             console.log(`[角色日志] ✓ 世界书文件已创建: ${worldbookName}`);
             
-            // 绑定到当前聊天
-            const context = getContext();
             if (context.chat_metadata) {
                 context.chat_metadata.world_info = worldbookName;
                 await context.saveMetadata();
@@ -156,12 +194,10 @@ async function getTargetLorebookName() {
             
             toastr.success(`已自动创建并绑定世界书: ${worldbookName}`, '角色日志');
             
-            // 触发UI刷新
             if (eventSource && event_types) {
                 eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
                 console.log('[角色日志] ✓ 已触发 WORLDINFO_SETTINGS_UPDATED 事件');
             }
-
         } catch (createError) {
             console.error(`[角色日志] ✗ 创建/绑定世界书失败:`, createError);
             toastr.error(`创建/绑定世界书失败: ${createError.message}`, '角色日志');
