@@ -1,5 +1,5 @@
 import { extension_settings, getContext } from "../../../extensions.js";
-import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
+import { saveSettingsDebounced } from "../../../../script.js";
 import { 
     loadWorldInfo, 
     saveWorldInfo,
@@ -7,6 +7,10 @@ import {
     createWorldInfoEntry
 } from "../../../world-info.js";
 import { characters } from "../../../../script.js";
+
+// 从全局对象获取事件系统（避免导入问题）
+const getEventSource = () => window.eventSource || window.SillyTavern?.eventSource;
+const getEventTypes = () => window.event_types || window.SillyTavern?.event_types;
 
 const extensionName = "character-journal-system";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
@@ -128,107 +132,28 @@ async function getTargetLorebookName() {
     
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
     
-    // 🔧 核心修复：直接用 world_names 列表判断是否存在
+    // 检查世界书是否存在
     try {
-        const { world_names } = await import('/scripts/world-info.js');
-        const allWorldbooks = world_names ? world_names.map(f => f.replace('.json', '')) : [];
-        const worldbookExists = allWorldbooks.includes(worldbookName);
-        
-        console.log('[角色日志] 当前所有世界书:', allWorldbooks);
-        console.log(`[角色日志] ${worldbookName} 是否存在:`, worldbookExists);
-        
-        if (worldbookExists) {
-            // 世界书真实存在，检查是否已绑定
-            const bookData = await loadWorldInfo(worldbookName);
-            const entriesCount = bookData?.entries ? Object.keys(bookData.entries).length : 0;
-            console.log(`[角色日志] ✓ 找到世界书: ${worldbookName} (entries数量: ${entriesCount})`);
-            
-            // 🔧 关键修复：检查是否已绑定，如果未绑定则自动绑定
-            const currentBoundBook = context.chat_metadata?.world_info;
-            if (currentBoundBook !== worldbookName) {
-                console.log(`[角色日志] 世界书存在但未绑定，当前绑定: ${currentBoundBook || 'None'}`);
-                console.log(`[角色日志] 正在自动绑定到: ${worldbookName}`);
-                
-                if (context.chat_metadata) {
-                    context.chat_metadata.world_info = worldbookName;
-                    await context.saveMetadata();
-                    console.log(`[角色日志] ✓ 世界书已自动绑定到聊天`);
-                    toastr.success(`已自动绑定世界书: ${worldbookName}`, '角色日志');
-                    
-                    // 触发UI刷新
-                    if (eventSource && event_types) {
-                        eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
-                        console.log('[角色日志] ✓ 已触发 WORLDINFO_SETTINGS_UPDATED 事件');
-                    }
-                }
-            } else {
-                console.log(`[角色日志] ✓ 世界书已正确绑定到当前聊天`);
-            }
-        } else {
-            // 世界书不存在，创建新文件
-            console.log(`[角色日志] ✗ 世界书不存在，开始创建: ${worldbookName}`);
-            
-            try {
-                // 直接创建世界书文件
-                const newBookData = {
-                    name: worldbookName,
-                    entries: {}
-                };
-                
-                // 使用 saveWorldInfo 创建新文件（第三个参数true表示创建新文件）
-                await saveWorldInfo(worldbookName, newBookData, true);
-                console.log(`[角色日志] ✓ 世界书文件已创建: ${worldbookName}`);
-                
-                // 🔧 关键修复：使用延迟确保文件系统操作完成
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-                // 绑定到当前聊天
-                if (context.chat_metadata) {
-                    context.chat_metadata.world_info = worldbookName;
-                    await context.saveMetadata();
-                    console.log(`[角色日志] ✓ 世界书已绑定到聊天`);
-                }
-                
-                toastr.success(`已自动创建并绑定世界书: ${worldbookName}`, '角色日志');
-                
-                // 触发UI刷新
-                if (eventSource && event_types) {
-                    eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
-                    console.log('[角色日志] ✓ 已触发 WORLDINFO_SETTINGS_UPDATED 事件');
-                }
-            } catch (createError) {
-                console.error(`[角色日志] ✗ 创建/绑定世界书失败:`, createError);
-                toastr.error(`创建/绑定世界书失败: ${createError.message}`, '角色日志');
-            }
-        }
+        await loadWorldInfo(worldbookName);
+        console.log(`[角色日志] ✓ 找到世界书: ${worldbookName}`);
     } catch (error) {
-        // 如果 loadWorldInfo 真的抛出错误（极少情况）
-        console.error(`[角色日志] ✗ 加载世界书时出错:`, error);
-        console.log(`[角色日志] 尝试创建世界书: ${worldbookName}`);
-        
+        // 世界书不存在，让 TavernHelper 来处理创建和绑定
+        console.log(`[角色日志] ✗ 世界书不存在，调用 TavernHelper.getOrCreateChatLorebook 创建并绑定: ${worldbookName}`);
         try {
-            const newBookData = {
-                name: worldbookName,
-                entries: {}
-            };
+            // 【核心修改】一步到位，创建、绑定、刷新UI
+            await TavernHelper.getOrCreateChatLorebook(worldbookName);
             
-            await saveWorldInfo(worldbookName, newBookData, true);
-            console.log(`[角色日志] ✓ 世界书文件已创建: ${worldbookName}`);
-            
-            if (context.chat_metadata) {
-                context.chat_metadata.world_info = worldbookName;
-                await context.saveMetadata();
-                console.log(`[角色日志] ✓ 世界书已绑定到聊天`);
-            }
-            
+            console.log(`[角色日志] ✓ 成功创建并绑定世界书: ${worldbookName}`);
             toastr.success(`已自动创建并绑定世界书: ${worldbookName}`, '角色日志');
-            
-            if (eventSource && event_types) {
-                eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
-                console.log('[角色日志] ✓ 已触发 WORLDINFO_SETTINGS_UPDATED 事件');
+
+            // 【关键】在TavernHelper操作后，手动刷新一下列表以确保万无一失
+            if (SillyTavern.worldInfo && typeof SillyTavern.worldInfo.refreshWorldInfoList === 'function') {
+                await SillyTavern.worldInfo.refreshWorldInfoList();
+                console.log('[角色日志] ✓ 已调用 worldInfo.refreshWorldInfoList() 刷新列表');
             }
+
         } catch (createError) {
-            console.error(`[角色日志] ✗ 创建/绑定世界书失败:`, createError);
+            console.error(`[角色日志] ✗ 使用 TavernHelper 创建/绑定世界书失败:`, createError);
             toastr.error(`创建/绑定世界书失败: ${createError.message}`, '角色日志');
         }
     }
@@ -2440,26 +2365,20 @@ jQuery(async () => {
     // 设置事件监听
     setupUIHandlers();
     
-    // 监听聊天消息事件
-    console.log('[角色日志] ========== 调试信息 ==========');
-    console.log('[角色日志] eventSource 类型:', typeof eventSource);
-    console.log('[角色日志] eventSource 值:', eventSource);
-    console.log('[角色日志] event_types 类型:', typeof event_types);
-    console.log('[角色日志] event_types.MESSAGE_RECEIVED:', event_types?.MESSAGE_RECEIVED);
-    console.log('[角色日志] event_types.CHARACTER_SELECTED:', event_types?.CHARACTER_SELECTED);
-    console.log('[角色日志] ====================================');
-    
-    if (!eventSource || !event_types) {
-        console.error('[角色日志] ❌ 事件系统导入失败！');
-        console.error('[角色日志] eventSource:', eventSource);
-        console.error('[角色日志] event_types:', event_types);
-        toastr.error('角色日志系统：事件系统导入失败', '扩展错误');
-        return;
-    }
-    
-    console.log('[角色日志] ✓ 开始注册事件监听器');
+    // 监听聊天消息事件（使用延迟初始化确保事件系统已加载）
+    const initEventListeners = () => {
+        const eventSource = getEventSource();
+        const event_types = getEventTypes();
         
-    eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
+        if (!eventSource || !event_types) {
+            console.warn('[角色日志] 事件系统未就绪，2秒后重试...');
+            setTimeout(initEventListeners, 2000);
+            return;
+        }
+        
+        console.log('[角色日志] ✓ 事件系统已就绪，注册事件监听器');
+        
+        eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
             const settings = extension_settings[extensionName];
             if (settings.enabled) {
                 updateStatus();
@@ -2469,16 +2388,16 @@ jQuery(async () => {
                     await checkAndAutoUpdate();
                 }
             }
-    });
-    
-    eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
-        updateStatus();
-    });
-    
-    // 监听角色切换事件（正确的事件是 CHAT_CHANGED）
-    eventSource.on(event_types.CHAT_CHANGED, async () => {
+        });
+        
+        eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
+            updateStatus();
+        });
+        
+        // 监听角色切换事件
+        eventSource.on(event_types.CHARACTER_SELECTED, async () => {
         try {
-            console.log('[角色日志] ========== 🔔 CHAT_CHANGED 事件触发 ==========');
+            console.log('[角色日志] ========== 🔔 CHARACTER_SELECTED 事件触发 ==========');
             
             const settings = extension_settings[extensionName];
             console.log('[角色日志] 功能启用状态:', settings?.enabled);
@@ -2511,7 +2430,11 @@ jQuery(async () => {
             console.error('[角色日志] ❌ CHARACTER_SELECTED 事件处理失败:', error);
             console.error('[角色日志] 错误堆栈:', error.stack);
         }
-    });
+        });
+    };
+    
+    // 延迟初始化事件监听器
+    initEventListeners();
     
     console.log('[角色日志系统] 扩展已加载');
     
