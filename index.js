@@ -294,11 +294,13 @@ function getUnloggedMessages(startFloor, endFloor, characterName) {
     }).filter(m => m.content);
 }
 
-// 调用AI生成日志
-async function callAI(messages) {
+// 调用AI生成日志（带重试机制）
+async function callAI(messages, retryCount = 0) {
     const settings = extension_settings[extensionName];
+    const MAX_RETRIES = 3; // 最大重试次数
+    const RETRY_DELAY = 2000; // 重试延迟（毫秒）
     
-    console.log('[角色日志] callAI开始');
+    console.log('[角色日志] callAI开始', retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : '');
     console.log('[角色日志] 是否使用自定义API:', !!settings.api.url);
     
     // 如果有自定义API设置
@@ -342,6 +344,18 @@ async function callAI(messages) {
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error('[角色日志] API错误响应:', errorText);
+                
+                // 判断是否应该重试
+                const isRetryableError = response.status >= 500 || response.status === 429;
+                
+                if (isRetryableError && retryCount < MAX_RETRIES) {
+                    console.log(`[角色日志] 检测到可重试错误 (${response.status})，将在 ${RETRY_DELAY}ms 后重试...`);
+                    toastr.warning(`API请求失败 (${response.status})，${RETRY_DELAY / 1000}秒后自动重试 (${retryCount + 1}/${MAX_RETRIES})`, '角色日志');
+                    
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                    return await callAI(messages, retryCount + 1);
+                }
+                
                 throw new Error(`API请求失败: ${response.status} - ${errorText.substring(0, 200)}`);
             }
             
@@ -355,11 +369,37 @@ async function callAI(messages) {
             
             const content = data.choices[0].message.content;
             console.log('[角色日志] 提取到内容长度:', content?.length || 0);
+            
+            // 重试成功后提示
+            if (retryCount > 0) {
+                toastr.success(`API请求成功（第 ${retryCount + 1} 次尝试）`, '角色日志');
+            }
+            
             return content;
         } catch (error) {
             console.error('[角色日志] API调用失败:', error);
             console.error('[角色日志] 错误堆栈:', error.stack);
-            toastr.error(`API调用失败: ${error.message}`, '角色日志');
+            
+            // 网络错误也可以重试
+            const isNetworkError = error.message.includes('Failed to fetch') || 
+                                   error.message.includes('NetworkError') ||
+                                   error.message.includes('SSL');
+            
+            if (isNetworkError && retryCount < MAX_RETRIES) {
+                console.log(`[角色日志] 检测到网络错误，将在 ${RETRY_DELAY}ms 后重试...`);
+                toastr.warning(`网络错误，${RETRY_DELAY / 1000}秒后自动重试 (${retryCount + 1}/${MAX_RETRIES})`, '角色日志');
+                
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                return await callAI(messages, retryCount + 1);
+            }
+            
+            // 达到最大重试次数或不可重试的错误
+            if (retryCount >= MAX_RETRIES) {
+                toastr.error(`API调用失败: 已达到最大重试次数 (${MAX_RETRIES})`, '角色日志');
+            } else {
+                toastr.error(`API调用失败: ${error.message}`, '角色日志');
+            }
+            
             return null;
         }
     }
@@ -383,6 +423,16 @@ async function callAI(messages) {
     } catch (error) {
         console.error('[角色日志] 调用ST API失败:', error);
         console.error('[角色日志] 错误堆栈:', error.stack);
+        
+        // ST API也支持重试
+        if (retryCount < MAX_RETRIES) {
+            console.log(`[角色日志] ST API调用失败，将在 ${RETRY_DELAY}ms 后重试...`);
+            toastr.warning(`生成失败，${RETRY_DELAY / 1000}秒后自动重试 (${retryCount + 1}/${MAX_RETRIES})`, '角色日志');
+            
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return await callAI(messages, retryCount + 1);
+        }
+        
         toastr.error(`生成日志失败: ${error.message}`, '角色日志');
         return null;
     }
