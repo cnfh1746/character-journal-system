@@ -126,14 +126,26 @@ async function bindWorldbookToChat(worldbookName) {
         
         context.chat_metadata.world_info = worldbookName;
         
-        // 触发SillyTavern的聊天保存机制
-        // 使用eventSource触发CHAT_CHANGED事件，让ST自动保存
+        // 🔥 关键修复：触发多个事件确保UI更新
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
+            // 触发世界书设置更新
             eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+            
+            // 🔥 新增：触发聊天元数据更新（让ST保存聊天）
+            eventSource.emit(event_types.CHAT_CHANGED);
+            
+            // 🔥 新增：触发世界书列表刷新（让新世界书出现在下拉列表）
+            if (event_types.WORLDINFO_FORCE_ACTIVATE) {
+                eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, worldbookName);
+            }
+        }
+        
+        // 🔥 新增：如果有 world_info 模块，直接调用其刷新函数
+        if (typeof window.updateWorldInfoList === 'function') {
+            await window.updateWorldInfoList();
         }
         
         console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
-        console.log(`[角色日志] 提示: 请确保保存当前聊天以持久化此设置`);
         return true;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
