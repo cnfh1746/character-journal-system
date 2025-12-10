@@ -1,18 +1,23 @@
-<!-- 新布局 - 精简主面板 + 独立设置窗口 -->
+<!-- 集成版设置面板 - 基于 preview_integration.html 设计 -->
 
 <!-- ========== 主扩展面板（精简版）========== -->
 <div id="character_journal_settings" class="character-journal-settings">
     <div class="character-journal-info">
-        <strong>📖 角色日志系统</strong><br>
-        为每个角色创建独立的第一人称日志条目。只在角色出场时激活，大幅节省Token，提升角色扮演质量。
+        <strong>✨ 智能日志与总结系统</strong><br>
+        为角色创建第一人称日志 + 自动总结剧情历史，大幅节省Token。
     </div>
 
-    <!-- 只保留两个选项：开关 + 设置按钮 -->
     <div class="character-journal-section">
         <div class="character-journal-field">
             <label>
                 <input type="checkbox" id="cj_enabled">
                 启用角色日志系统
+            </label>
+        </div>
+        <div class="character-journal-field">
+            <label>
+                <input type="checkbox" id="as_enabled">
+                启用自动总结系统
             </label>
         </div>
 
@@ -21,12 +26,11 @@
         </div>
     </div>
 
-    <!-- 状态显示（保留） -->
     <div class="character-journal-section">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <h3 style="margin: 0;">📊 状态信息</h3>
             <button class="character-journal-btn" id="cj_refresh_status" style="padding: 6px 12px; font-size: 13px;">🔄
-                刷新状态</button>
+                刷新</button>
         </div>
         <div class="character-journal-status" id="cj_status_display">
             等待初始化...
@@ -34,11 +38,11 @@
     </div>
 </div>
 
-<!-- ========== 独立设置窗口（标签页式）========== -->
+<!-- ========== 独立设置窗口 ========== -->
 <div class="character-journal-modal" id="cj_settings_modal" style="display: none;">
-    <div class="character-journal-modal-content" style="max-width: 900px; max-height: 85vh;">
+    <div class="character-journal-modal-content" style="max-width: 950px; max-height: 90vh;">
         <div class="character-journal-modal-header">
-            <h2>⚙️ 角色日志系统 - 设置</h2>
+            <h2>✨ 智能日志与总结系统 - 设置</h2>
             <div class="character-journal-modal-controls">
                 <button class="character-journal-modal-control-btn minimize" id="cj_minimize_settings" title="最小化">
                     <span>−</span>
@@ -49,145 +53,144 @@
             </div>
         </div>
 
-        <!-- 标签页导航 -->
+        <!-- 5个标签页导航 -->
         <div class="character-journal-tabs">
-            <button class="character-journal-tab active" data-tab="basic">基础设置</button>
-            <button class="character-journal-tab" data-tab="characters">角色管理</button>
-            <button class="character-journal-tab" data-tab="journal">日志配置</button>
-            <button class="character-journal-tab" data-tab="api">API设置</button>
-            <button class="character-journal-tab" data-tab="advanced">高级选项</button>
-            <button class="character-journal-tab" data-tab="operations">操作面板</button>
-            <button class="character-journal-tab summary-tab" data-tab="autosummary">📝 剧情总结</button>
+            <button class="character-journal-tab active" data-tab="status">📊 概览与控制</button>
+            <button class="character-journal-tab cj-tab" data-tab="journal">👤 角色日志配置</button>
+            <button class="character-journal-tab summary-tab" data-tab="summary">📝 自动总结配置</button>
+            <button class="character-journal-tab" data-tab="worldbook">📖 世界书集成</button>
+            <button class="character-journal-tab" data-tab="api">🌐 API设置</button>
         </div>
 
-        <div class="character-journal-modal-body" style="overflow-y: auto; max-height: calc(85vh - 180px);">
+        <div class="character-journal-modal-body" style="overflow-y: auto; max-height: calc(90vh - 180px);">
 
-            <!-- ========== 标签页1：基础设置 ========== -->
-            <div class="character-journal-tab-content active" data-tab="basic">
-                <div class="character-journal-section">
-                    <h3>⚙️ 基础设置</h3>
-
-                    <div class="character-journal-field">
-                        <label for="cj_target">世界书目标：</label>
-                        <select id="cj_target">
-                            <option value="character_main">角色主世界书</option>
-                            <option value="dedicated">专用世界书</option>
-                        </select>
-                        <small>选择将日志写入角色的主世界书还是创建专用世界书</small>
-                    </div>
-
-                    <div class="character-journal-field" id="cj_dedicated_worldbook_field" style="display: none;">
-                        <label for="cj_dedicated_worldbook">专用世界书名称：</label>
-                        <div style="display: flex; gap: 8px;">
-                            <input type="text" id="cj_dedicated_worldbook" placeholder="输入世界书名称或留空自动生成"
-                                style="flex: 1;">
-                            <button class="character-journal-btn" id="cj_select_worldbook" style="padding: 8px 12px;">📚
-                                选择现有</button>
+            <!-- ========== 标签页1：概览与控制 ========== -->
+            <div class="character-journal-tab-content active" data-tab="status">
+                <div class="character-journal-grid-2">
+                    <!-- 角色日志状态 -->
+                    <div class="character-journal-section cj-section">
+                        <div class="character-journal-section-header">
+                            <span>👤 角色日志系统</span>
+                            <label class="character-journal-checkbox-inline" onclick="event.stopPropagation()">
+                                <input type="checkbox" id="cj_enabled_modal"> 启用
+                            </label>
                         </div>
-                        <small>自定义世界书名称，留空则自动生成（CharacterJournal-聊天ID）</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_detection_mode">角色检测模式：</label>
-                        <select id="cj_detection_mode">
-                            <option value="auto">自动检测（AI识别）</option>
-                            <option value="manual">手动指定</option>
-                        </select>
-                        <small>自动检测会使用AI从对话中识别所有角色</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="cj_auto_update">
-                            启用自动更新
-                        </label>
-                        <small>达到阈值后自动触发日志更新（无需手动点击）</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_update_threshold">更新阈值（消息数）：</label>
-                        <input type="number" id="cj_update_threshold" min="5" max="100" value="20">
-                        <small>积累多少条消息后更新一次角色日志</small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ========== 标签页2：角色管理 ========== -->
-            <div class="character-journal-tab-content" data-tab="characters" style="display: none;">
-                <div class="character-journal-section">
-                    <h3>👥 角色管理</h3>
-
-                    <div class="character-journal-info">
-                        <strong>自动检测的角色：</strong><br>
-                        <div id="detected_characters_display">
-                            <span style="color: #999;">AI将在更新时识别角色</span>
+                        <div class="character-journal-section-body">
+                            <div class="character-journal-status-box cj-bg" id="cj_journal_status">
+                                <strong>检测到的角色：</strong><br>
+                                <span style="color: #999;">等待更新...</span>
+                            </div>
+                            <div class="character-journal-field">
+                                <label>
+                                    <input type="checkbox" id="cj_auto_update"> 启用自动更新
+                                </label>
+                                <small>达到阈值后自动触发日志更新</small>
+                            </div>
+                            <div class="character-journal-button-group">
+                                <button class="character-journal-btn" id="cj_manual_update">🔄 更新所有角色</button>
+                                <button class="character-journal-btn outline" id="cj_batch_update">📦 批量处理...</button>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="character-journal-field">
-                        <label for="cj_manual_characters">手动指定角色（逗号分隔）：</label>
-                        <input type="text" id="cj_manual_characters" placeholder="例如: Alice, Bob, Carol">
-                        <small>在手动模式下，只为这些角色创建日志</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_exclude_names">排除名单（逗号分隔）：</label>
-                        <input type="text" id="cj_exclude_names" placeholder="例如: 用户, 鸣潮, 系统">
-                        <small>不为这些名字创建日志（可填入用户名、世界名、旁白等）</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="cj_exclude_user">
-                            自动排除用户角色
-                        </label>
-                        <small>自动排除当前用户名</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="cj_use_worldinfo">
-                            读取世界书增强日志生成
-                        </label>
-                        <small>为每个角色从世界书中查找相关资料，提供给AI生成更符合人设的日志（可能较慢）</small>
+                    <!-- 自动总结状态 -->
+                    <div class="character-journal-section as-section">
+                        <div class="character-journal-section-header">
+                            <span>📝 自动总结系统</span>
+                            <label class="character-journal-checkbox-inline" onclick="event.stopPropagation()">
+                                <input type="checkbox" id="as_enabled_modal"> 启用
+                            </label>
+                        </div>
+                        <div class="character-journal-section-body">
+                            <div class="character-journal-status-box as-bg" id="as_summary_status">
+                                <strong>剧情推进状态：</strong><br>
+                                <span style="color: #999;">等待更新...</span>
+                            </div>
+                            <div class="character-journal-field">
+                                <label>
+                                    <input type="checkbox" id="as_small_auto_enabled"> 启用自动小总结
+                                </label>
+                                <small>达到阈值自动执行</small>
+                            </div>
+                            <div class="character-journal-button-group">
+                                <button class="character-journal-btn purple" id="as_execute_small">📝 执行小总结</button>
+                                <button class="character-journal-btn purple outline" id="as_execute_large">📚
+                                    执行大总结</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="character-journal-section">
-                    <h3>🔍 智能过滤</h3>
+                <!-- 快捷操作 -->
+                <div class="character-journal-section common-section" style="margin-top: 20px;">
+                    <h3>🛠️ 快捷操作与维护</h3>
+                    <div class="character-journal-button-group">
+                        <button class="character-journal-btn warning" id="cj_manual_refine">🗜️ 精炼所有内容</button>
+                        <button class="character-journal-btn danger outline" id="cj_clear_all">🗑️ 清空所有日志</button>
+                    </div>
+                </div>
 
+                <!-- 手动生成指定角色 -->
+                <div class="character-journal-section cj-section">
+                    <h3>✍️ 手动生成指定角色</h3>
                     <div class="character-journal-info"
-                        style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-                        <strong>💡 说明：</strong><br>
-                        • <strong>性别筛选</strong>已由AI根据世界书资料自动判断（更准确）<br>
-                        • 这里仅保留<strong>出场次数过滤</strong>（纯统计，可选）
+                        style="background: #e8f5e9; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                        当AI识别漏掉某个角色时，可以手动输入角色名生成日志。
                     </div>
-
                     <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="cj_filter_enabled">
-                            启用出场次数过滤
-                        </label>
-                        <small>过滤出场次数太少的配角</small>
+                        <label for="cj_manual_character_name">角色名称：</label>
+                        <input type="text" id="cj_manual_character_name" placeholder="输入要生成日志的角色名">
                     </div>
-
                     <div class="character-journal-field">
-                        <label for="cj_min_appearances">最小出场次数：</label>
-                        <input type="number" id="cj_min_appearances" min="0" max="50" value="5">
-                        <small>角色名字在对话中出现少于此次数就排除（用于过滤配角）。设为0则不过滤。</small>
+                        <label for="cj_manual_message_count">读取消息数：</label>
+                        <input type="number" id="cj_manual_message_count" min="5" max="200" value="20">
+                    </div>
+                    <div class="character-journal-button-group">
+                        <button class="character-journal-btn success" id="cj_generate_for_character">🚀 生成该角色日志</button>
                     </div>
                 </div>
             </div>
 
-            <!-- ========== 标签页3：日志配置 ========== -->
+            <!-- ========== 标签页2：角色日志配置 ========== -->
             <div class="character-journal-tab-content" data-tab="journal" style="display: none;">
-                <div class="character-journal-section">
-                    <h3>📝 日志生成</h3>
-
+                <div class="character-journal-section cj-section">
+                    <h3>📋 基础规则</h3>
+                    <div class="character-journal-grid-2">
+                        <div class="character-journal-field">
+                            <label for="cj_detection_mode">角色检测模式</label>
+                            <select id="cj_detection_mode">
+                                <option value="auto">自动检测（AI识别）</option>
+                                <option value="manual">手动指定</option>
+                            </select>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_update_threshold">更新阈值（消息数）</label>
+                            <input type="number" id="cj_update_threshold" min="5" max="100" value="20">
+                            <small>每隔多少条消息生成一次日志</small>
+                        </div>
+                    </div>
                     <div class="character-journal-field">
-                        <label for="cj_journal_prompt">日志生成提示词：</label>
-                        <textarea id="cj_journal_prompt" rows="15" placeholder="输入生成日志的系统提示词..."
-                            style="font-family: monospace; font-size: 13px;">你是记忆记录助手。我会提供一些名字和它们的世界书资料，请根据资料和对话记录判断哪些是**实际的角色**并为其生成第一人称日志。
+                        <label for="cj_manual_characters">手动指定角色（逗号分隔）</label>
+                        <input type="text" id="cj_manual_characters" placeholder="例如: Alice, Bob, Carol">
+                    </div>
+                    <div class="character-journal-field">
+                        <label for="cj_exclude_names">排除名单（逗号分隔）</label>
+                        <input type="text" id="cj_exclude_names" placeholder="例如: 用户, 系统, 旁白">
+                    </div>
+                    <div class="character-journal-field">
+                        <label><input type="checkbox" id="cj_exclude_user"> 自动排除用户角色</label>
+                    </div>
+                    <div class="character-journal-field">
+                        <label><input type="checkbox" id="cj_use_worldinfo"> 使用世界书增强生成</label>
+                        <small>读取世界书内容以生成更准确的角色心理活动（消耗更多Token）</small>
+                    </div>
+                </div>
+
+                <div class="character-journal-section cj-section">
+                    <h3>💭 提示词工程</h3>
+                    <div class="character-journal-field">
+                        <label for="cj_journal_prompt">日志生成提示词</label>
+                        <textarea id="cj_journal_prompt" rows="8" style="font-family: monospace; font-size: 13px;">你是记忆记录助手。我会提供一些名字和它们的世界书资料，请根据资料和对话记录判断哪些是**实际的角色**并为其生成第一人称日志。
 
 🔴 核心判断规则：
 1. **根据世界书资料判断是否为角色实体**
@@ -195,241 +198,73 @@
 3. **出场判断**：只为在本轮对话中实际出场的角色生成日志
 4. **输出要求**：必须是第一人称日记形式</textarea>
                     </div>
-                </div>
-
-                <div class="character-journal-section">
-                    <h3>🗜️ 自动精炼</h3>
-
                     <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="cj_auto_refine">
-                            启用自动精炼
-                        </label>
-                        <small>当日志条目达到阈值时自动压缩精炼</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_refine_threshold">精炼阈值（字符数）：</label>
-                        <input type="number" id="cj_refine_threshold" min="1000" max="20000" value="5000">
-                        <small>日志达到该字符数时自动触发精炼</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_refine_prompt">精炼提示词：</label>
-                        <textarea id="cj_refine_prompt" rows="12" placeholder="输入精炼日志的系统提示词..."
-                            style="font-family: monospace; font-size: 13px;">你是角色档案分析师。请将以下日志条目精炼成简洁的角色档案。
+                        <label for="cj_refine_prompt">日志精炼提示词</label>
+                        <textarea id="cj_refine_prompt" rows="6" style="font-family: monospace; font-size: 13px;">你是角色档案分析师。请将以下日志条目精炼成简洁的角色档案。
 
 提取并整理：
 1. 核心性格特征
 2. 关键关系及感受
 3. 重要经历
-4. 角色成长轨迹
-
-输出格式：
-【性格特征】
-[2-3句话]
-
-【人际关系】
-- 角色X: [关系与感受]
-
-【重要经历】
-- [事件1]
-
-【角色成长】
-[变化总结]</textarea>
+4. 角色成长轨迹</textarea>
                     </div>
                 </div>
-            </div>
 
-            <!-- ========== 标签页4：API设置 ========== -->
-            <div class="character-journal-tab-content" data-tab="api" style="display: none;">
-                <div class="character-journal-section">
-                    <h3>🌐 API设置</h3>
-
-                    <div class="character-journal-info"
-                        style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-                        <strong>💡 提示：</strong>留空所有字段将使用SillyTavern的主API设置
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_api_url">API地址：</label>
-                        <input type="text" id="cj_api_url" placeholder="留空使用ST默认API">
-                        <small>留空将使用SillyTavern的主API设置</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_api_key">API密钥：</label>
-                        <input type="password" id="cj_api_key" placeholder="留空使用ST默认密钥">
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_api_model">模型名称：</label>
-                        <div style="display: flex; gap: 8px;">
-                            <input type="text" id="cj_api_model" placeholder="留空使用ST默认模型" style="flex: 1;">
-                            <button class="character-journal-btn" id="cj_fetch_models" style="padding: 8px 12px;">📋
-                                拉取模型</button>
+                <div class="character-journal-section cj-section collapsible">
+                    <h3>🔍 智能过滤 <span class="collapse-arrow">▼</span></h3>
+                    <div class="collapsible-body">
+                        <div class="character-journal-field">
+                            <label><input type="checkbox" id="cj_filter_enabled"> 启用出场次数过滤</label>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_min_appearances">最小出场次数</label>
+                            <input type="number" id="cj_min_appearances" min="0" max="50" value="5">
+                            <small>低于此次数的角色将不生成日志</small>
                         </div>
                     </div>
+                </div>
 
-                    <div class="character-journal-field">
-                        <label for="cj_api_max_tokens">最大输出Token数：</label>
-                        <input type="number" id="cj_api_max_tokens" min="500" max="16000" value="2000">
-                        <small>控制AI输出的最大长度</small>
-                    </div>
-
-                    <div class="character-journal-button-group">
-                        <button class="character-journal-btn" id="cj_test_api">🔗 测试连接</button>
-                    </div>
-
-                    <div class="character-journal-status" id="cj_api_status" style="display: none; margin-top: 10px;">
+                <div class="character-journal-section cj-section collapsible">
+                    <h3>🗜️ 自动精炼 <span class="collapse-arrow">▼</span></h3>
+                    <div class="collapsible-body">
+                        <div class="character-journal-field">
+                            <label><input type="checkbox" id="cj_auto_refine"> 启用自动精炼</label>
+                            <small>当日志条目达到阈值时自动压缩精炼</small>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_refine_threshold">精炼阈值（字符数）</label>
+                            <input type="number" id="cj_refine_threshold" min="1000" max="20000" value="5000">
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- ========== 标签页5：高级选项 ========== -->
-            <div class="character-journal-tab-content" data-tab="advanced" style="display: none;">
-                <div class="character-journal-section">
-                    <h3>📋 世界书条目设置</h3>
-
-                    <div class="character-journal-field">
-                        <label for="cj_keywords_template">关键词模板：</label>
-                        <input type="text" id="cj_keywords_template" value="{name}">
-                        <small>使用 {name} 表示角色名。例如: {name}, {name}的日志</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_insertion_position">插入位置：</label>
-                        <select id="cj_insertion_position">
-                            <option value="0">在角色定义之后</option>
-                            <option value="1">在示例对话之后</option>
-                            <option value="2">在聊天历史之前</option>
-                            <option value="3">在系统提示之后</option>
-                            <option value="4">在AN顶部</option>
-                        </select>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_entry_order">条目顺序（优先级）：</label>
-                        <input type="number" id="cj_entry_order" min="0" max="1000" value="90">
-                        <small>数值越大优先级越高</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_depth">深度：</label>
-                        <input type="number" id="cj_depth" min="0" max="10" value="4">
-                        <small>控制在对话历史中的插入深度</small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ========== 标签页6：操作面板 ========== -->
-            <div class="character-journal-tab-content" data-tab="operations" style="display: none;">
-                <div class="character-journal-section">
-                    <h3>🎮 操作</h3>
-
-                    <div class="character-journal-button-group">
-                        <button class="character-journal-btn" id="cj_manual_update">🔄 手动更新日志</button>
-                        <button class="character-journal-btn primary" id="cj_batch_update">📦 批量更新指定范围</button>
-                        <button class="character-journal-btn warning" id="cj_manual_refine">🗜️ 手动精炼所有日志</button>
-                        <button class="character-journal-btn danger" id="cj_clear_all">🗑️ 清空所有日志条目</button>
-                    </div>
-                </div>
-
-                <div class="character-journal-section">
-                    <h3>✍️ 手动指定角色生成</h3>
-                    <div class="character-journal-info"
-                        style="background: #e8f5e9; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-                        <strong>💡 使用说明：</strong><br>
-                        当AI识别漏掉某个角色时，可以手动输入角色名生成日志。<br>
-                        系统会读取最近N条消息，为该角色生成第一人称日志。
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_manual_character_name">角色名称：</label>
-                        <input type="text" id="cj_manual_character_name" placeholder="输入要生成日志的角色名"
-                            style="margin-bottom: 10px;">
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="cj_manual_message_count">读取消息数：</label>
-                        <input type="number" id="cj_manual_message_count" min="5" max="200" value="20"
-                            style="margin-bottom: 10px;">
-                        <small>从最新消息往前读取的条数（默认20条）</small>
-                    </div>
-
-                    <div class="character-journal-button-group">
-                        <button class="character-journal-btn success" id="cj_generate_for_character">🚀 生成该角色日志</button>
-                    </div>
-                </div>
-
-                <div class="character-journal-section">
-                    <h3>📊 详细状态</h3>
-                    <div class="character-journal-status" id="cj_status_display_modal">
-                        等待初始化...
-                    </div>
-                </div>
-            </div>
-
-            <!-- ========== 标签页7：自动总结 ========== -->
-            <div class="character-journal-tab-content" data-tab="autosummary" style="display: none;">
+            <!-- ========== 标签页3：自动总结配置 ========== -->
+            <div class="character-journal-tab-content" data-tab="summary" style="display: none;">
                 <div class="character-journal-section as-section">
-                    <h3>📝 自动总结系统</h3>
-
-                    <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="as_enabled">
-                            启用自动总结系统
-                        </label>
-                        <small>将对话历史自动总结并写入世界书</small>
+                    <h3>📝 小总结配置</h3>
+                    <div class="character-journal-grid-2">
+                        <div class="character-journal-field">
+                            <label><input type="checkbox" id="as_small_auto_enabled_2"> 启用自动小总结</label>
+                            <small>达到阈值自动执行</small>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="as_small_threshold">触发阈值（消息数）</label>
+                            <input type="number" id="as_small_threshold" min="5" max="100" value="20">
+                        </div>
                     </div>
-
                     <div class="character-journal-field">
-                        <label for="as_target">世界书目标：</label>
-                        <select id="as_target">
-                            <option value="character_main">与角色日志相同</option>
-                            <option value="dedicated">专用世界书</option>
-                        </select>
-                    </div>
-
-                    <div class="character-journal-field" id="as_dedicated_worldbook_field">
-                        <label for="as_dedicated_worldbook">专用世界书名称：</label>
-                        <input type="text" id="as_dedicated_worldbook" placeholder="留空自动生成 (AutoSummary-聊天ID)">
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="as_retention_count">保留最近消息数：</label>
-                        <input type="number" id="as_retention_count" min="0" max="50" value="5">
-                        <small>不总结最近N条消息，保持对话连贯性</small>
-                    </div>
-                </div>
-
-                <div class="character-journal-section as-section">
-                    <h3>📋 小总结配置</h3>
-
-                    <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="as_small_auto_enabled">
-                            启用自动小总结
-                        </label>
-                        <small>达到阈值自动执行</small>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="as_small_threshold">触发阈值（消息数）：</label>
-                        <input type="number" id="as_small_threshold" min="5" max="100" value="20">
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="as_small_interactive" checked>
-                            交互模式
-                        </label>
+                        <label><input type="checkbox" id="as_small_interactive" checked> 交互模式</label>
                         <small>勾选后，每次写入前弹出预览窗口供人工修改</small>
                     </div>
-
                     <div class="character-journal-field">
-                        <label for="as_small_prompt">小总结提示词：</label>
-                        <textarea id="as_small_prompt" rows="8" style="font-family: monospace; font-size: 13px;">你是一个专业的对话总结助手。请仔细阅读以下对话记录，提取关键信息并生成简洁、准确的总结。
+                        <label for="as_retention_count">保留最近消息数</label>
+                        <input type="number" id="as_retention_count" min="0" max="50" value="5">
+                        <small>不总结最近的N条消息，保持对话连贯性</small>
+                    </div>
+                    <div class="character-journal-field">
+                        <label for="as_small_prompt">小总结提示词</label>
+                        <textarea id="as_small_prompt" rows="6" style="font-family: monospace; font-size: 13px;">你是一个专业的对话总结助手。请仔细阅读以下对话记录，提取关键信息并生成简洁、准确的总结。
 
 总结要求：
 1. 保留重要的剧情发展和角色互动
@@ -442,23 +277,17 @@
 
                 <div class="character-journal-section as-section">
                     <h3>📚 大总结与精炼</h3>
-
                     <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="as_large_auto_enabled">
-                            启用自动大总结
-                        </label>
-                        <small>合并小总结以精简世界书条目</small>
+                        <label><input type="checkbox" id="as_large_auto_enabled"> 启用自动大总结</label>
+                        <small>合并小总结以精简世界书</small>
                     </div>
-
                     <div class="character-journal-field">
-                        <label for="as_large_token_threshold">触发阈值（字符数）：</label>
+                        <label for="as_large_token_threshold">触发阈值（字符数）</label>
                         <input type="number" id="as_large_token_threshold" min="1000" max="50000" value="5000">
                     </div>
-
                     <div class="character-journal-field">
-                        <label for="as_large_prompt">大总结提示词：</label>
-                        <textarea id="as_large_prompt" rows="8" style="font-family: monospace; font-size: 13px;">你是一个专业的内容精炼助手。请将以下多个总结记录精炼成一段连贯的章节历史。
+                        <label for="as_large_prompt">大总结提示词</label>
+                        <textarea id="as_large_prompt" rows="6" style="font-family: monospace; font-size: 13px;">你是一个专业的内容精炼助手。请将以下多个总结记录精炼成一段连贯的章节历史。
 
 精炼要求：
 1. 保留所有关键剧情点和重要事件
@@ -468,55 +297,155 @@
                     </div>
                 </div>
 
-                <div class="character-journal-section as-section">
-                    <h3>🏷️ 高级选项</h3>
+                <div class="character-journal-section as-section collapsible">
+                    <h3>🏷️ 标签提取与内容排除 <span class="collapse-arrow">▼</span></h3>
+                    <div class="collapsible-body">
+                        <div class="character-journal-field">
+                            <label><input type="checkbox" id="as_tag_extraction_enabled"> 启用标签提取</label>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="as_extraction_tags">提取标签（逗号分隔）</label>
+                            <input type="text" id="as_extraction_tags" placeholder="例如: content, narration, action">
+                            <small>只总结这些 XML 标签内的文本</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-                    <div class="character-journal-field">
-                        <label>
-                            <input type="checkbox" id="as_tag_extraction_enabled">
-                            启用标签提取
-                        </label>
-                        <small>只总结指定XML标签内的文本</small>
+            <!-- ========== 标签页4：世界书集成 ========== -->
+            <div class="character-journal-tab-content" data-tab="worldbook" style="display: none;">
+                <div class="character-journal-grid-2">
+                    <!-- 角色日志世界书设置 -->
+                    <div class="character-journal-section cj-section">
+                        <h3>👤 角色日志 - 世界书目标</h3>
+                        <div class="character-journal-field">
+                            <label for="cj_target">写入目标</label>
+                            <select id="cj_target">
+                                <option value="character_main">角色主世界书</option>
+                                <option value="dedicated">专用世界书</option>
+                            </select>
+                            <small>选择将日志写入角色的绑定世界书，还是创建专用世界书</small>
+                        </div>
+                        <div class="character-journal-field" id="cj_dedicated_worldbook_field" style="display: none;">
+                            <label for="cj_dedicated_worldbook">专用世界书名称</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="cj_dedicated_worldbook" placeholder="留空自动生成" style="flex: 1;">
+                                <button class="character-journal-btn" id="cj_select_worldbook"
+                                    style="padding: 8px 12px;">📚 选择</button>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="character-journal-field">
-                        <label for="as_extraction_tags">提取标签（逗号分隔）：</label>
-                        <input type="text" id="as_extraction_tags" placeholder="例如: content, narration, action">
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="as_lore_activation_mode">激活模式：</label>
-                        <select id="as_lore_activation_mode">
-                            <option value="constant">常驻激活 (Constant)</option>
-                            <option value="keyed">关键词激活 (Keyed)</option>
-                        </select>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="as_lore_keywords">关键词（逗号分隔）：</label>
-                        <input type="text" id="as_lore_keywords" value="剧情, 总结, 历史">
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="as_lore_insertion_position">插入位置：</label>
-                        <select id="as_lore_insertion_position">
-                            <option value="0">在角色定义之后</option>
-                            <option value="2">在聊天历史之前</option>
-                            <option value="4">在AN顶部</option>
-                        </select>
-                    </div>
-
-                    <div class="character-journal-field">
-                        <label for="as_lore_depth">深度：</label>
-                        <input type="number" id="as_lore_depth" min="0" max="10" value="4">
+                    <!-- 自动总结世界书设置 -->
+                    <div class="character-journal-section as-section">
+                        <h3>📝 剧情总结 - 世界书目标</h3>
+                        <div class="character-journal-field">
+                            <label for="as_target">写入目标</label>
+                            <select id="as_target">
+                                <option value="character_main">与角色日志相同</option>
+                                <option value="dedicated">专用世界书</option>
+                            </select>
+                            <small>选择将总结写入角色的绑定世界书，还是创建专用世界书</small>
+                        </div>
+                        <div class="character-journal-field" id="as_dedicated_worldbook_field" style="display: none;">
+                            <label for="as_dedicated_worldbook">专用世界书名称</label>
+                            <input type="text" id="as_dedicated_worldbook" placeholder="留空自动生成 (AutoSummary-聊天ID)">
+                        </div>
                     </div>
                 </div>
 
-                <div class="character-journal-section as-section">
-                    <h3>🎮 总结操作</h3>
+                <div class="character-journal-grid-2">
+                    <!-- 角色日志条目参数 -->
+                    <div class="character-journal-section cj-section">
+                        <h3>👤 角色日志条目参数</h3>
+                        <div class="character-journal-field">
+                            <label for="cj_keywords_template">关键词模板</label>
+                            <input type="text" id="cj_keywords_template" value="{name}">
+                            <small>使用 {name} 表示角色名</small>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_insertion_position">插入位置</label>
+                            <select id="cj_insertion_position">
+                                <option value="0">在角色定义之后</option>
+                                <option value="1">在示例对话之后</option>
+                                <option value="2">在聊天历史之前</option>
+                                <option value="3">在系统提示之后</option>
+                                <option value="4">在AN顶部</option>
+                            </select>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_depth">插入深度</label>
+                            <input type="number" id="cj_depth" min="0" max="10" value="4">
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_entry_order">条目优先级</label>
+                            <input type="number" id="cj_entry_order" min="0" max="1000" value="90">
+                        </div>
+                    </div>
+
+                    <!-- 剧情总结条目参数 -->
+                    <div class="character-journal-section as-section">
+                        <h3>📝 剧情总结条目参数</h3>
+                        <div class="character-journal-field">
+                            <label for="as_lore_activation_mode">激活模式</label>
+                            <select id="as_lore_activation_mode">
+                                <option value="constant">常驻激活 (Constant)</option>
+                                <option value="keyed">关键词激活 (Keyed)</option>
+                            </select>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="as_lore_keywords">关键词（逗号分隔）</label>
+                            <input type="text" id="as_lore_keywords" value="剧情, 总结, 历史">
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="as_lore_insertion_position">插入位置</label>
+                            <select id="as_lore_insertion_position">
+                                <option value="0">在角色定义之后</option>
+                                <option value="2">在聊天历史之前</option>
+                                <option value="4">在AN顶部</option>
+                            </select>
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="as_lore_depth">插入深度</label>
+                            <input type="number" id="as_lore_depth" min="0" max="10" value="4">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== 标签页5：API设置 ========== -->
+            <div class="character-journal-tab-content" data-tab="api" style="display: none;">
+                <div class="character-journal-section common-section">
+                    <h3>🌐 统一 API 配置</h3>
+                    <div class="character-journal-info"
+                        style="background: #e8f8f5; border: 1px solid #a2d9ce; padding: 12px; border-radius: 4px; margin-bottom: 15px;">
+                        💡 提示：留空以下字段将默认使用 SillyTavern 的全局 API 设置。角色日志和剧情总结将共享此 API。
+                    </div>
+                    <div class="character-journal-field">
+                        <label for="cj_api_url">API 地址</label>
+                        <input type="text" id="cj_api_url" placeholder="留空使用ST默认API">
+                    </div>
+                    <div class="character-journal-field">
+                        <label for="cj_api_key">API 密钥</label>
+                        <input type="password" id="cj_api_key" placeholder="留空使用ST默认密钥">
+                    </div>
+                    <div class="character-journal-field">
+                        <label for="cj_api_model">模型名称</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="cj_api_model" placeholder="留空使用ST默认模型" style="flex: 1;">
+                            <button class="character-journal-btn" id="cj_fetch_models" style="padding: 8px 12px;">📋
+                                拉取模型</button>
+                        </div>
+                    </div>
+                    <div class="character-journal-field">
+                        <label for="cj_api_max_tokens">最大输出Token数</label>
+                        <input type="number" id="cj_api_max_tokens" min="500" max="16000" value="2000">
+                        <small>控制AI输出的最大长度</small>
+                    </div>
                     <div class="character-journal-button-group">
-                        <button class="character-journal-btn" id="as_execute_small">📝 执行小总结</button>
-                        <button class="character-journal-btn" id="as_execute_large">📚 执行大总结</button>
+                        <button class="character-journal-btn" id="cj_test_api">🔗 测试连接</button>
+                    </div>
+                    <div class="character-journal-status" id="cj_api_status" style="display: none; margin-top: 10px;">
                     </div>
                 </div>
             </div>

@@ -219,6 +219,7 @@
     from {
         opacity: 0;
     }
+
     to {
         opacity: 1;
     }
@@ -256,6 +257,7 @@
         transform: translateY(-50px);
         opacity: 0;
     }
+
     to {
         transform: translateY(0);
         opacity: 1;
@@ -267,6 +269,7 @@
         transform: scale(0.8);
         opacity: 0;
     }
+
     to {
         transform: scale(1);
         opacity: 1;
@@ -474,6 +477,7 @@
         opacity: 0;
         transform: translateY(-10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -599,4 +603,165 @@
 
 .auto-summary-modal-footer .character-journal-btn.danger:hover {
     background-color: #c0392b;
+}
+
+/* ========== 新版集成UI样式 ========== */
+
+/* 两栏网格布局 */
+.character-journal-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 800px) {
+    .character-journal-grid-2 {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 区块样式增强 */
+.character-journal-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background: #f0f4f8;
+    border-bottom: 1px solid #e0e0e0;
+    font-weight: 700;
+    color: #2c3e50;
+    margin: -15px -15px 15px -15px;
+    border-radius: 8px 8px 0 0;
+}
+
+.character-journal-checkbox-inline {
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.character-journal-checkbox-inline input {
+    margin-right: 5px;
+}
+
+/* Section类型颜色 */
+.character-journal-section.cj-section {
+    border-left-color: #4a90e2;
+}
+
+.character-journal-section.cj-section .character-journal-section-header {
+    border-left: 4px solid #4a90e2;
+    margin-left: -15px;
+    padding-left: 15px;
+}
+
+.character-journal-section.as-section {
+    border-left-color: #8e44ad;
+}
+
+.character-journal-section.as-section h3 {
+    color: #6c3483;
+}
+
+.character-journal-section.as-section .character-journal-section-header {
+    border-left: 4px solid #8e44ad;
+    margin-left: -15px;
+    padding-left: 15px;
+}
+
+.character-journal-section.common-section {
+    border-left-color: #27ae60;
+}
+
+.character-journal-section.common-section h3 {
+    color: #1e8449;
+}
+
+/* 状态框 */
+.character-journal-status-box {
+    padding: 12px;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.character-journal-status-box.cj-bg {
+    background: #eaf2f8;
+}
+
+.character-journal-status-box.as-bg {
+    background: #f4ecf7;
+}
+
+/* 紫色按钮 */
+.character-journal-btn.purple {
+    background-color: #8e44ad;
+}
+
+.character-journal-btn.purple:hover {
+    background-color: #6c3483;
+}
+
+.character-journal-btn.purple.outline {
+    background: transparent;
+    border: 1px solid #8e44ad;
+    color: #8e44ad;
+}
+
+.character-journal-btn.purple.outline:hover {
+    background: rgba(142, 68, 173, 0.1);
+}
+
+/* outline样式 */
+.character-journal-btn.outline {
+    background: transparent;
+    border: 1px solid #4a90e2;
+    color: #4a90e2;
+}
+
+.character-journal-btn.outline:hover {
+    background: rgba(74, 144, 226, 0.1);
+}
+
+.character-journal-btn.danger.outline {
+    background: transparent;
+    border: 1px solid #e74c3c;
+    color: #e74c3c;
+}
+
+.character-journal-btn.danger.outline:hover {
+    background: rgba(231, 76, 60, 0.1);
+}
+
+/* 标签页颜色区分 */
+.character-journal-tab.cj-tab.active {
+    background-color: #4a90e2;
+    border-bottom-color: #357abd;
+}
+
+.character-journal-tab.summary-tab.active {
+    background-color: #8e44ad;
+    border-bottom-color: #6c3483;
+}
+
+/* 可折叠区块 */
+.character-journal-section.collapsible .collapse-arrow {
+    display: inline-block;
+    transition: transform 0.2s;
+    margin-left: 8px;
+}
+
+.character-journal-section.collapsible.collapsed .collapse-arrow {
+    transform: rotate(-90deg);
+}
+
+.character-journal-section.collapsible.collapsed .collapsible-body {
+    display: none;
+}
+
+.character-journal-section.collapsible h3 {
+    cursor: pointer;
 }

@@ -1838,12 +1838,21 @@ function loadSettings() {
     // ========== 加载自动总结设置 ==========
     const summarySettings = settings.autoSummary;
     $('#as_enabled').prop('checked', summarySettings.enabled);
+    $('#as_enabled_modal').prop('checked', summarySettings.enabled);
     $('#as_target').val(summarySettings.target);
     $('#as_dedicated_worldbook').val(summarySettings.dedicatedWorldbook || '');
     $('#as_retention_count').val(summarySettings.retentionCount);
 
+    // 根据as_target值显示/隐藏专用世界书字段
+    if (summarySettings.target === 'dedicated') {
+        $('#as_dedicated_worldbook_field').show();
+    } else {
+        $('#as_dedicated_worldbook_field').hide();
+    }
+
     // 小总结设置
     $('#as_small_auto_enabled').prop('checked', summarySettings.smallSummary.autoEnabled);
+    $('#as_small_auto_enabled_2').prop('checked', summarySettings.smallSummary.autoEnabled);
     $('#as_small_threshold').val(summarySettings.smallSummary.threshold);
     $('#as_small_interactive').prop('checked', summarySettings.smallSummary.interactive);
     $('#as_small_prompt').val(summarySettings.smallSummary.prompt);
@@ -1862,6 +1871,9 @@ function loadSettings() {
     $('#as_lore_keywords').val(summarySettings.lore.keywords);
     $('#as_lore_insertion_position').val(summarySettings.lore.insertionPosition);
     $('#as_lore_depth').val(summarySettings.lore.depth);
+
+    // 同步模态框中的复选框
+    $('#cj_enabled_modal').prop('checked', settings.enabled);
 
     updateStatus();
 }
@@ -2931,6 +2943,54 @@ function setupUIHandlers() {
         }
 
         await executeLargeSummary();
+    });
+
+    // ========== 复选框同步 ==========
+    // 主面板和模态框的启用开关同步
+    $('#cj_enabled').on('change', function () {
+        $('#cj_enabled_modal').prop('checked', $(this).prop('checked'));
+        saveSettings();
+    });
+
+    $('#cj_enabled_modal').on('change', function () {
+        $('#cj_enabled').prop('checked', $(this).prop('checked'));
+        saveSettings();
+    });
+
+    $('#as_enabled').on('change', function () {
+        $('#as_enabled_modal').prop('checked', $(this).prop('checked'));
+        saveSettings();
+    });
+
+    $('#as_enabled_modal').on('change', function () {
+        $('#as_enabled').prop('checked', $(this).prop('checked'));
+        saveSettings();
+    });
+
+    // 小总结自动启用开关同步 (概览页和配置页)
+    $('#as_small_auto_enabled').on('change', function () {
+        $('#as_small_auto_enabled_2').prop('checked', $(this).prop('checked'));
+        saveSettings();
+    });
+
+    $('#as_small_auto_enabled_2').on('change', function () {
+        $('#as_small_auto_enabled').prop('checked', $(this).prop('checked'));
+        saveSettings();
+    });
+
+    // 自动总结 - 世界书目标改变时显示/隐藏专用世界书字段
+    $('#as_target').on('change', function () {
+        if ($(this).val() === 'dedicated') {
+            $('#as_dedicated_worldbook_field').slideDown();
+        } else {
+            $('#as_dedicated_worldbook_field').slideUp();
+        }
+        saveSettings();
+    });
+
+    // ========== 可折叠区块 ==========
+    $('.character-journal-section.collapsible h3').on('click', function () {
+        $(this).closest('.character-journal-section').toggleClass('collapsed');
     });
 }
 
