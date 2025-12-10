@@ -2864,6 +2864,27 @@ function setupUIHandlers() {
         }
     });
 
+    // 模态框中的刷新按钮
+    $('#cj_refresh_status_modal').on('click', async function () {
+        console.log('[角色日志] 用户点击模态框刷新状态按钮');
+        const btn = $(this);
+        const originalText = btn.html();
+        btn.prop('disabled', true).html('🔄 刷新中...');
+
+        try {
+            await updateStatus();
+            // 同时更新模态框中的状态显示
+            const statusContent = $('#cj_status_display').html();
+            $('#cj_status_display_modal').html(statusContent);
+            toastr.success('状态已刷新', '角色日志');
+        } catch (error) {
+            console.error('[角色日志] 刷新状态失败:', error);
+            toastr.error('刷新失败: ' + error.message, '角色日志');
+        } finally {
+            btn.prop('disabled', false).html(originalText);
+        }
+    });
+
     // 检测模式改变时更新显示
     $('#cj_detection_mode').on('change', function () {
         updateStatus();

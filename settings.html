@@ -122,7 +122,7 @@
                 </div>
 
                 <!-- 快捷操作 -->
-                <div class="character-journal-section common-section" style="margin-top: 20px;">
+                <div class="character-journal-section common-section" style="margin-top: 15px;">
                     <h3>🛠️ 快捷操作与维护</h3>
                     <div class="character-journal-button-group">
                         <button class="character-journal-btn warning" id="cj_manual_refine">🗜️ 精炼所有内容</button>
@@ -130,23 +130,40 @@
                     </div>
                 </div>
 
+                <!-- 详细状态信息 -->
+                <div class="character-journal-section common-section" style="margin-top: 15px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0;">📊 状态信息</h3>
+                        <button class="character-journal-btn" id="cj_refresh_status_modal"
+                            style="padding: 6px 15px; font-size: 13px;">🔄 刷新</button>
+                    </div>
+                    <div class="character-journal-status" id="cj_status_display_modal"
+                        style="max-height: 300px; overflow-y: auto;">
+                        等待刷新...
+                    </div>
+                </div>
+
                 <!-- 手动生成指定角色 -->
-                <div class="character-journal-section cj-section">
-                    <h3>✍️ 手动生成指定角色</h3>
-                    <div class="character-journal-info"
-                        style="background: #e8f5e9; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-                        当AI识别漏掉某个角色时，可以手动输入角色名生成日志。
-                    </div>
-                    <div class="character-journal-field">
-                        <label for="cj_manual_character_name">角色名称：</label>
-                        <input type="text" id="cj_manual_character_name" placeholder="输入要生成日志的角色名">
-                    </div>
-                    <div class="character-journal-field">
-                        <label for="cj_manual_message_count">读取消息数：</label>
-                        <input type="number" id="cj_manual_message_count" min="5" max="200" value="20">
-                    </div>
-                    <div class="character-journal-button-group">
-                        <button class="character-journal-btn success" id="cj_generate_for_character">🚀 生成该角色日志</button>
+                <div class="character-journal-section cj-section collapsible collapsed" style="margin-top: 15px;">
+                    <h3>✍️ 手动生成指定角色 <span class="collapse-arrow">▼</span></h3>
+                    <div class="collapsible-body">
+                        <div class="character-journal-info"
+                            style="background: #e8f5e9; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                            当AI识别漏掉某个角色时，可以手动输入角色名生成日志。
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_manual_character_name">角色名称：</label>
+                            <input type="text" id="cj_manual_character_name" placeholder="输入要生成日志的角色名">
+                        </div>
+                        <div class="character-journal-field">
+                            <label for="cj_manual_message_count">读取消息数：</label>
+                            <input type="number" id="cj_manual_message_count" min="5" max="200" value="20">
+                        </div>
+                        <div class="character-journal-button-group">
+                            <button class="character-journal-btn success" id="cj_generate_for_character">🚀
+                                生成该角色日志</button>
+                        </div>
                     </div>
                 </div>
             </div>
