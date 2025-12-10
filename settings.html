@@ -123,24 +123,15 @@
 
                 <!-- 快捷操作 -->
                 <div class="character-journal-section common-section" style="margin-top: 15px;">
-                    <h3>🛠️ 快捷操作与维护</h3>
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3 style="margin: 0;">🛠️ 快捷操作与维护</h3>
+                        <button class="character-journal-btn" id="cj_refresh_status_modal"
+                            style="padding: 6px 15px; font-size: 13px;">🔄 刷新状态</button>
+                    </div>
                     <div class="character-journal-button-group">
                         <button class="character-journal-btn warning" id="cj_manual_refine">🗜️ 精炼所有内容</button>
                         <button class="character-journal-btn danger outline" id="cj_clear_all">🗑️ 清空所有日志</button>
-                    </div>
-                </div>
-
-                <!-- 详细状态信息 -->
-                <div class="character-journal-section common-section" style="margin-top: 15px;">
-                    <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h3 style="margin: 0;">📊 状态信息</h3>
-                        <button class="character-journal-btn" id="cj_refresh_status_modal"
-                            style="padding: 6px 15px; font-size: 13px;">🔄 刷新</button>
-                    </div>
-                    <div class="character-journal-status" id="cj_status_display_modal"
-                        style="max-height: 300px; overflow-y: auto;">
-                        等待刷新...
                     </div>
                 </div>
 
