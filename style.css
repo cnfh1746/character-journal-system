@@ -611,13 +611,23 @@
 .character-journal-grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 20px;
+    gap: 25px;
+    margin-bottom: 20px;
 }
 
 @media (max-width: 800px) {
     .character-journal-grid-2 {
         grid-template-columns: 1fr;
     }
+}
+
+/* 世界书集成页的区块间距 */
+.character-journal-tab-content[data-tab="worldbook"] .character-journal-section {
+    padding: 18px;
+}
+
+.character-journal-tab-content[data-tab="worldbook"] .character-journal-field {
+    margin-bottom: 18px;
 }
 
 /* 区块样式增强 */
