@@ -1669,13 +1669,16 @@ async function updateStatus() {
 
     if (!context.chat) {
         $('#cj_status_display').html('未加载对话');
-        $('#detected_characters_display').html('<span style="color: #999;">AI将在更新时识别角色</span>');
+        $('#cj_journal_status').html('<strong>检测到的角色：</strong><br><span style="color: #999;">未加载对话</span>');
+        $('#as_summary_status').html('<strong>剧情推进状态：</strong><br><span style="color: #999;">未加载对话</span>');
         return;
     }
 
+    const totalMessages = context.chat.length;
+
+    // ========== 更新角色日志状态 ==========
     try {
         const lorebookName = await getTargetLorebookName();
-        const totalMessages = context.chat.length;
 
         // 从世界书中读取已存在的角色日志
         let trackedCharacters = [];
@@ -1692,7 +1695,6 @@ async function updateStatus() {
                     const match = entry.content.match(PROGRESS_SEAL_REGEX);
                     const progress = match ? parseInt(match[1], 10) : 0;
 
-                    // 更新最大进度
                     if (progress > maxProgress) {
                         maxProgress = progress;
                     }
@@ -1704,15 +1706,17 @@ async function updateStatus() {
             console.log('[角色日志] 无法读取世界书');
         }
 
-        // 更新检测到的角色显示
+        // 更新概览页的角色日志状态框
+        let cjStatusHtml = '<strong>检测到的角色：</strong><br>';
         if (trackedCharacters.length > 0) {
-            const charBadges = trackedCharacters.map(c =>
-                `<span class="character-badge detected">${c.name}</span>`
-            ).join('');
-            $('#detected_characters_display').html(charBadges);
+            for (const char of trackedCharacters) {
+                const percentage = totalMessages > 0 ? Math.round((char.progress / totalMessages) * 100) : 0;
+                cjStatusHtml += `<span style="color: #27ae60;">● ${char.name}</span> (更新至 ${char.progress}楼, ${percentage}%)<br>`;
+            }
         } else {
-            $('#detected_characters_display').html('<span style="color: #999;">AI将在更新时识别角色</span>');
+            cjStatusHtml += '<span style="color: #999;">等待更新...</span>';
         }
+        $('#cj_journal_status').html(cjStatusHtml);
 
         // 计算自动触发信息
         const unloggedCount = totalMessages - maxProgress;
@@ -1774,6 +1778,7 @@ async function updateStatus() {
         $('#cj_status_display').html(statusHtml);
     } catch (error) {
         console.error('[角色日志] 更新状态失败:', error);
+        $('#cj_journal_status').html(`<strong>检测到的角色：</strong><br><span style="color: #e74c3c;">⚠️ 读取失败</span>`);
         $('#cj_status_display').html(`
             <strong>当前状态：</strong><br>
             • 功能状态: ${settings.enabled ? '✓ 已启用' : '✗ 未启用'}<br>
@@ -1781,6 +1786,66 @@ async function updateStatus() {
             <br>
             <span style="color: #e74c3c;">⚠️ 无法读取详细状态: ${error.message}</span>
         `);
+    }
+
+    // ========== 更新自动总结状态 ==========
+    try {
+        const summarySettings = settings.autoSummary;
+        if (!summarySettings) {
+            $('#as_summary_status').html('<strong>剧情推进状态：</strong><br><span style="color: #999;">配置未初始化</span>');
+            return;
+        }
+
+        const asLorebookName = await getAutoSummaryLorebookName();
+        const summarizedCount = await readAutoSummaryProgress(asLorebookName);
+        const retentionCount = summarySettings.retentionCount || 5;
+        const summarizableLength = totalMessages - retentionCount;
+        const unsummarizedCount = Math.max(0, summarizableLength - summarizedCount);
+
+        // 更新概览页的自动总结状态框
+        let asStatusHtml = '<strong>剧情推进状态：</strong><br>';
+        asStatusHtml += `已总结至 <strong>${summarizedCount}</strong> 楼<br>`;
+        if (unsummarizedCount > 0) {
+            const color = unsummarizedCount >= summarySettings.smallSummary.threshold ? '#e74c3c' : '#f39c12';
+            asStatusHtml += `<span style="color: ${color};">待总结: ${unsummarizedCount} 楼</span>`;
+        } else {
+            asStatusHtml += `<span style="color: #27ae60;">已全部总结</span>`;
+        }
+        $('#as_summary_status').html(asStatusHtml);
+
+        // 同时追加到详细状态显示
+        let asSummaryDetails = `<br><hr style="border: none; border-top: 1px dashed #ccc; margin: 10px 0;"><br>`;
+        asSummaryDetails += `<strong>📝 自动总结状态：</strong><br>`;
+        asSummaryDetails += `• 功能状态: ${summarySettings.enabled ? '✓ 已启用' : '✗ 未启用'}<br>`;
+        asSummaryDetails += `• 自动小总结: ${summarySettings.smallSummary.autoEnabled ? '✓ 已启用' : '✗ 未启用'}<br>`;
+        asSummaryDetails += `<br>`;
+        asSummaryDetails += `<strong>📊 总结进度：</strong><br>`;
+        asSummaryDetails += `• 当前对话总长度: <strong>${totalMessages}</strong> 楼<br>`;
+        asSummaryDetails += `• 保留最近消息数: ${retentionCount} 楼<br>`;
+        asSummaryDetails += `• 可总结范围: 1-${summarizableLength} 楼<br>`;
+        asSummaryDetails += `• <span style="color: #27ae60;">✓ 已总结: 1-${summarizedCount} 楼</span><br>`;
+
+        if (unsummarizedCount > 0) {
+            const color = unsummarizedCount >= summarySettings.smallSummary.threshold ? '#e74c3c' : '#f39c12';
+            asSummaryDetails += `• <span style="color: ${color};">⏳ 待总结: ${summarizedCount + 1}-${summarizableLength} 楼 (共 ${unsummarizedCount} 楼)</span><br>`;
+        }
+
+        asSummaryDetails += `<br>`;
+        asSummaryDetails += `<strong>🎯 自动触发：</strong><br>`;
+        asSummaryDetails += `• 自动触发阈值: ${summarySettings.smallSummary.threshold} 楼<br>`;
+
+        if (unsummarizedCount >= summarySettings.smallSummary.threshold) {
+            asSummaryDetails += `• <span style="color: #e74c3c;">⚠️ 已达阈值，${summarySettings.smallSummary.autoEnabled ? '将自动触发总结' : '请手动执行总结'}</span><br>`;
+        } else {
+            asSummaryDetails += `• <span style="color: #95a5a6;">还需 ${summarySettings.smallSummary.threshold - unsummarizedCount} 楼触发自动总结</span><br>`;
+        }
+
+        // 追加到主状态显示区域
+        $('#cj_status_display').append(asSummaryDetails);
+        $('#cj_status_display_modal').html($('#cj_status_display').html());
+    } catch (error) {
+        console.error('[自动总结] 更新状态失败:', error);
+        $('#as_summary_status').html(`<strong>剧情推进状态：</strong><br><span style="color: #e74c3c;">⚠️ ${error.message}</span>`);
     }
 }
 
