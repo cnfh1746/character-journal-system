@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
-import { 
-    loadWorldInfo, 
+import {
+    loadWorldInfo,
     saveWorldInfo,
     createNewWorldInfo,
     createWorldInfoEntry
@@ -28,11 +28,11 @@ const defaultSettings = {
     excludeUser: true,
     autoUpdate: false,
     useWorldInfo: true,
-    
+
     // 智能过滤设置
     filterEnabled: true,
     minAppearances: 5,
-    
+
     updateThreshold: 20,
     journalPrompt: `你是记忆记录助手。我会提供一些名字和它们的世界书资料，请根据资料和对话记录判断哪些是**实际的角色**并为其生成第一人称日志。
 
@@ -70,10 +70,10 @@ const defaultSettings = {
 • 地点/组织/物品（资料描述的不是人物）
 • 未出场角色（只是被提到但无实际行动）
 • 无法判断的实体（既无资料也无出场描写）`,
-    
-        autoRefine: false,
-        refineThreshold: 5000,
-        refinePrompt: `你是角色档案分析师。请将以下日志条目精炼成简洁的角色档案。
+
+    autoRefine: false,
+    refineThreshold: 5000,
+    refinePrompt: `你是角色档案分析师。请将以下日志条目精炼成简洁的角色档案。
 
 提取并整理：
 1. 核心性格特征
@@ -93,24 +93,525 @@ const defaultSettings = {
 
 【角色成长】
 [变化总结]`,
-    
+
     keywordsTemplate: "{name}",
     insertionPosition: 2,
     entryOrder: 90,
     depth: 4,
-    
+
     api: {
         url: "",
         key: "",
         model: "",
         maxTokens: 2000
+    },
+
+    // ========== 自动总结功能配置 (Auto Summary) ==========
+    autoSummary: {
+        enabled: false,
+        target: "character_main",
+        dedicatedWorldbook: "",
+        retentionCount: 5,
+
+        smallSummary: {
+            autoEnabled: false,
+            threshold: 20,
+            interactive: true,
+            prompt: `你是一个专业的对话总结助手。请仔细阅读以下对话记录，提取关键信息并生成简洁、准确的总结。
+
+总结要求：
+1. 保留重要的剧情发展和角色互动
+2. 记录关键的情感变化和决策
+3. 简明扼要，避免冗余
+4. 使用第三人称叙述
+5. 保持客观中立的语气
+
+请基于对话内容生成总结。`
+        },
+
+        largeSummary: {
+            autoEnabled: false,
+            tokenThreshold: 5000,
+            prompt: `你是一个专业的内容精炼助手。你将收到多个零散的详细总结记录，请将它们提炼并融合成一段连贯、精简的章节历史。
+
+精炼要求：
+1. 保留所有关键剧情点和重要事件
+2. 合并重复或相似的信息
+3. 使用流畅的叙事结构
+4. 突出重要的转折点和高潮
+5. 压缩细节但保留核心内容
+6. 保持时间线的清晰和连贯
+
+请将以下多个总结记录精炼成一个完整的章节。`
+        },
+
+        tagExtraction: {
+            enabled: false,
+            tags: ""
+        },
+
+        lore: {
+            activationMode: "constant",
+            keywords: "剧情, 总结, 历史",
+            insertionPosition: 2,
+            depth: 4
+        }
     }
 };
+
+// ========== 自动总结模块常量 ==========
+const SUMMARY_COMMENT = "【自动总结】对话历史总结";
+const SUMMARY_PROGRESS_REGEX = /本条勿动【前(\d+)楼总结已完成】否则后续总结无法进行。/;
+
+// ========== 自动总结模块工具函数 ==========
+
+// 获取下一个可用的UID (0-999范围)
+function getNextAvailableUid(entries) {
+    const usedUids = new Set(Object.keys(entries).map(k => parseInt(k, 10)));
+    for (let uid = 0; uid <= 999; uid++) {
+        if (!usedUids.has(uid)) {
+            return uid.toString();
+        }
+    }
+    return Object.keys(entries).length.toString();
+}
+
+// 标签提取工具函数
+function extractBlocksByTags(text, tags) {
+    if (!text || !tags || tags.length === 0) return [];
+
+    const blocks = [];
+    tags.forEach(tag => {
+        const tagName = tag.trim();
+        if (tagName) {
+            const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'g');
+            const matches = text.match(regex);
+            if (matches) {
+                blocks.push(...matches);
+            }
+        }
+    });
+
+    return blocks;
+}
+
+// ========== 自动总结模块核心函数 ==========
+
+// 获取自动总结的目标世界书名称
+async function getAutoSummaryLorebookName() {
+    const settings = extension_settings[extensionName];
+    const summarySettings = settings.autoSummary;
+    const context = getContext();
+
+    if (summarySettings.target === "dedicated") {
+        if (summarySettings.dedicatedWorldbook && summarySettings.dedicatedWorldbook.trim()) {
+            return summarySettings.dedicatedWorldbook.trim();
+        } else {
+            const chatId = context.chatId || "unknown";
+            return `AutoSummary-${chatId}`;
+        }
+    }
+
+    // character_main 模式
+    const charName = context.name2 || "角色";
+    return `${charName}日志`;
+}
+
+// 读取自动总结进度
+async function readAutoSummaryProgress(lorebookName) {
+    if (!lorebookName) return 0;
+
+    try {
+        const bookData = await loadWorldInfo(lorebookName);
+        if (!bookData || !bookData.entries) return 0;
+
+        const summaryEntry = Object.values(bookData.entries).find(
+            e => e.comment === SUMMARY_COMMENT && !e.disable
+        );
+
+        if (!summaryEntry) return 0;
+
+        const match = summaryEntry.content.match(SUMMARY_PROGRESS_REGEX);
+        return match ? parseInt(match[1], 10) : 0;
+    } catch (error) {
+        console.error('[自动总结] 读取进度失败:', error);
+        return 0;
+    }
+}
+
+// 获取未总结的消息 (用于剧情总结)
+function getUnsummarizedMessages(startFloor, endFloor) {
+    const context = getContext();
+    const settings = extension_settings[extensionName];
+    const summarySettings = settings.autoSummary;
+    const chat = context.chat;
+
+    if (!chat || chat.length === 0) return [];
+
+    const safeStartFloor = Math.max(startFloor, 2);
+    if (safeStartFloor > endFloor) return [];
+
+    const historySlice = chat.slice(safeStartFloor - 1, endFloor);
+    if (historySlice.length === 0) return [];
+
+    const userName = context.name1 || '用户';
+    const characterName = context.name2 || '角色';
+
+    const useTagExtraction = summarySettings.tagExtraction.enabled;
+    const tagsToExtract = useTagExtraction && summarySettings.tagExtraction.tags
+        ? summarySettings.tagExtraction.tags.split(',').map(t => t.trim()).filter(Boolean)
+        : [];
+
+    return historySlice.map((msg, index) => {
+        let content = msg.mes;
+
+        if (useTagExtraction && tagsToExtract.length > 0) {
+            const blocks = extractBlocksByTags(content, tagsToExtract);
+            if (blocks.length > 0) {
+                content = blocks.join('\n\n');
+            }
+        }
+
+        if (!content.trim()) return null;
+
+        return {
+            floor: safeStartFloor + index,
+            author: msg.is_user ? userName : characterName,
+            content: content.trim()
+        };
+    }).filter(Boolean);
+}
+
+// 生成小总结
+async function generateSmallSummary(startFloor, endFloor) {
+    const settings = extension_settings[extensionName];
+    const summarySettings = settings.autoSummary;
+    const messages = getUnsummarizedMessages(startFloor, endFloor);
+
+    if (messages.length === 0) {
+        toastr.warning('选定范围内没有有效消息', '自动总结');
+        return null;
+    }
+
+    const formattedHistory = messages
+        .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
+        .join('\n');
+
+    const aiMessages = [
+        { role: 'system', content: summarySettings.smallSummary.prompt },
+        { role: 'user', content: `请严格根据以下"对话记录"中的内容进行总结，不要添加任何额外信息。\n\n<对话记录>\n${formattedHistory}\n</对话记录>` }
+    ];
+
+    toastr.info('正在生成剧情总结...', '自动总结');
+    const summary = await callAI(aiMessages);
+
+    if (!summary) {
+        toastr.error('生成总结失败', '自动总结');
+        return null;
+    }
+
+    return summary;
+}
+
+// 写入总结到世界书
+async function writeSummaryToLorebook(summary, startFloor, endFloor) {
+    const settings = extension_settings[extensionName];
+    const summarySettings = settings.autoSummary;
+
+    try {
+        const lorebookName = await getAutoSummaryLorebookName();
+
+        let bookData;
+        try {
+            bookData = await loadWorldInfo(lorebookName);
+        } catch (error) {
+            console.log(`[自动总结] 创建新世界书: ${lorebookName}`);
+            bookData = { entries: {}, name: lorebookName };
+        }
+
+        if (!bookData.entries) {
+            bookData.entries = {};
+        }
+
+        let summaryEntry = Object.values(bookData.entries).find(
+            e => e.comment === SUMMARY_COMMENT && !e.disable
+        );
+
+        const newSeal = `\n\n本条勿动【前${endFloor}楼总结已完成】否则后续总结无法进行。`;
+        const newChapter = `\n\n---\n\n【${startFloor}楼至${endFloor}楼详细总结记录】\n${summary}`;
+
+        if (summaryEntry) {
+            const contentWithoutSeal = summaryEntry.content.replace(SUMMARY_PROGRESS_REGEX, "").trim();
+            summaryEntry.content = contentWithoutSeal + newChapter + newSeal;
+        } else {
+            const entryKey = getNextAvailableUid(bookData.entries);
+            const keywords = summarySettings.lore.keywords.split(',').map(k => k.trim()).filter(Boolean);
+            const isConstant = summarySettings.lore.activationMode === 'constant';
+
+            summaryEntry = {
+                uid: parseInt(entryKey, 10),
+                key: keywords,
+                keysecondary: [],
+                comment: SUMMARY_COMMENT,
+                content: `以下是依照顺序已发生剧情` + newChapter + newSeal,
+                constant: isConstant,
+                selective: !isConstant,
+                selectiveLogic: 0,
+                addMemo: false,
+                order: 100,
+                position: parseInt(summarySettings.lore.insertionPosition) || 0,
+                disable: false,
+                excludeRecursion: true,
+                preventRecursion: true,
+                delayUntilRecursion: false,
+                probability: 100,
+                useProbability: true,
+                depth: parseInt(summarySettings.lore.depth) || 4,
+                group: '',
+                groupOverride: false,
+                groupWeight: 100,
+                scanDepth: null,
+                caseSensitive: false,
+                matchWholeWords: false,
+                useGroupScoring: false,
+                automationId: '',
+                role: 0,
+                vectorized: false,
+                sticky: 0,
+                cooldown: 0,
+                delay: 0
+            };
+
+            bookData.entries[entryKey] = summaryEntry;
+        }
+
+        await saveWorldInfo(lorebookName, bookData, true);
+        toastr.success(`总结已写入世界书 ${lorebookName}`, '自动总结');
+
+        // 检查是否需要自动触发大总结
+        if (summarySettings.largeSummary.autoEnabled) {
+            const tokenCount = summaryEntry.content.length;
+            if (tokenCount >= summarySettings.largeSummary.tokenThreshold) {
+                toastr.info('总结条目已达阈值，将自动执行大总结...', '自动总结');
+                setTimeout(async () => {
+                    await executeLargeSummary();
+                }, 1000);
+            }
+        }
+
+        return true;
+    } catch (error) {
+        console.error('[自动总结] 写入世界书失败:', error);
+        toastr.error(`写入失败: ${error.message}`, '自动总结');
+        return false;
+    }
+}
+
+// 显示总结确认对话框
+function showSummaryModal(summary, callbacks) {
+    const modal = $('<div class="auto-summary-modal"></div>');
+    const modalContent = $(`
+        <div class="auto-summary-modal-content">
+            <div class="auto-summary-modal-header">
+                <h2>📝 总结预览</h2>
+            </div>
+            <div class="auto-summary-modal-body">
+                <textarea class="summary-textarea">${summary}</textarea>
+            </div>
+            <div class="auto-summary-modal-footer">
+                <button class="character-journal-btn" id="summary-regenerate">🔄 重新生成</button>
+                <button class="character-journal-btn success" id="summary-confirm">✓ 确认保存</button>
+                <button class="character-journal-btn danger" id="summary-cancel">✗ 取消</button>
+            </div>
+        </div>
+    `);
+
+    modal.append(modalContent);
+    $('body').append(modal);
+
+    modal.find('#summary-confirm').on('click', async function () {
+        const editedSummary = modal.find('.summary-textarea').val();
+        modal.remove();
+        if (callbacks.onConfirm) {
+            await callbacks.onConfirm(editedSummary);
+        }
+    });
+
+    modal.find('#summary-regenerate').on('click', async function () {
+        modal.find('.summary-textarea').prop('disabled', true).val('正在重新生成...');
+        if (callbacks.onRegenerate) {
+            await callbacks.onRegenerate(modal);
+        }
+    });
+
+    modal.find('#summary-cancel').on('click', function () {
+        modal.remove();
+        if (callbacks.onCancel) {
+            callbacks.onCancel();
+        }
+    });
+
+    modal.on('click', function (e) {
+        if (e.target === modal[0]) {
+            modal.remove();
+            if (callbacks.onCancel) {
+                callbacks.onCancel();
+            }
+        }
+    });
+}
+
+// 执行小总结
+async function executeSmallSummary(startFloor, endFloor, autoMode = false) {
+    const settings = extension_settings[extensionName];
+    const summarySettings = settings.autoSummary;
+
+    const summary = await generateSmallSummary(startFloor, endFloor);
+    if (!summary) return false;
+
+    if (autoMode && !summarySettings.smallSummary.interactive) {
+        return await writeSummaryToLorebook(summary, startFloor, endFloor);
+    }
+
+    return new Promise((resolve) => {
+        showSummaryModal(summary, {
+            onConfirm: async (editedSummary) => {
+                const success = await writeSummaryToLorebook(editedSummary, startFloor, endFloor);
+                resolve(success);
+            },
+            onRegenerate: async (modal) => {
+                const newSummary = await generateSmallSummary(startFloor, endFloor);
+                if (newSummary) {
+                    modal.find('.summary-textarea').prop('disabled', false).val(newSummary);
+                } else {
+                    modal.find('.summary-textarea').prop('disabled', false).val(summary);
+                    toastr.error('重新生成失败', '自动总结');
+                }
+            },
+            onCancel: () => {
+                toastr.info('总结已取消', '自动总结');
+                resolve(false);
+            }
+        });
+    });
+}
+
+// 执行大总结
+async function executeLargeSummary() {
+    const settings = extension_settings[extensionName];
+    const summarySettings = settings.autoSummary;
+
+    try {
+        const lorebookName = await getAutoSummaryLorebookName();
+        const bookData = await loadWorldInfo(lorebookName);
+
+        if (!bookData || !bookData.entries) {
+            toastr.error('未找到世界书', '自动总结');
+            return false;
+        }
+
+        const summaryEntry = Object.values(bookData.entries).find(
+            e => e.comment === SUMMARY_COMMENT && !e.disable
+        );
+
+        if (!summaryEntry) {
+            toastr.error('未找到总结条目', '自动总结');
+            return false;
+        }
+
+        const originalContent = summaryEntry.content;
+        const progressMatch = originalContent.match(SUMMARY_PROGRESS_REGEX);
+
+        if (!progressMatch) {
+            toastr.error('总结条目格式不正确', '自动总结');
+            return false;
+        }
+
+        const contentToRefine = originalContent.replace(SUMMARY_PROGRESS_REGEX, '').trim();
+
+        const aiMessages = [
+            { role: 'system', content: summarySettings.largeSummary.prompt },
+            { role: 'user', content: `请将以下多个零散的"详细总结记录"提炼并融合成一段连贯的章节历史。原文如下：\n\n${contentToRefine}` }
+        ];
+
+        toastr.info('正在生成大总结...', '自动总结');
+        const refinedContent = await callAI(aiMessages);
+
+        if (!refinedContent) {
+            toastr.error('生成大总结失败', '自动总结');
+            return false;
+        }
+
+        return new Promise((resolve) => {
+            showSummaryModal(refinedContent, {
+                onConfirm: async (editedContent) => {
+                    const totalFloors = parseInt(progressMatch[1], 10);
+                    const header = `以下内容是【1楼-${totalFloors}楼】已发生的剧情回顾。\n\n---\n\n`;
+                    const newContent = header + editedContent + `\n\n【前${totalFloors}楼篇章编撰已完成】\n\n本条勿动【前${totalFloors}楼总结已完成】否则后续总结无法进行。`;
+
+                    summaryEntry.content = newContent;
+                    await saveWorldInfo(lorebookName, bookData, true);
+
+                    toastr.success('大总结已完成', '自动总结');
+                    resolve(true);
+                },
+                onRegenerate: async (modal) => {
+                    modal.find('.summary-textarea').prop('disabled', true).val('正在重新生成...');
+                    const newRefined = await callAI(aiMessages);
+                    if (newRefined) {
+                        modal.find('.summary-textarea').prop('disabled', false).val(newRefined);
+                    } else {
+                        modal.find('.summary-textarea').prop('disabled', false).val(refinedContent);
+                        toastr.error('重新生成失败', '自动总结');
+                    }
+                },
+                onCancel: () => {
+                    toastr.info('大总结已取消', '自动总结');
+                    resolve(false);
+                }
+            });
+        });
+    } catch (error) {
+        console.error('[自动总结] 大总结失败:', error);
+        toastr.error(`大总结失败: ${error.message}`, '自动总结');
+        return false;
+    }
+}
+
+// 检查并自动触发剧情总结
+async function checkAndAutoSummary() {
+    const settings = extension_settings[extensionName];
+    const summarySettings = settings.autoSummary;
+
+    if (!summarySettings.enabled || !summarySettings.smallSummary.autoEnabled) {
+        return;
+    }
+
+    try {
+        const context = getContext();
+        const lorebookName = await getAutoSummaryLorebookName();
+        const summarizedCount = await readAutoSummaryProgress(lorebookName);
+        const currentChatLength = context.chat.length;
+        const retentionCount = summarySettings.retentionCount || 5;
+        const summarizableLength = currentChatLength - retentionCount;
+        const unsummarizedCount = summarizableLength - summarizedCount;
+
+        if (unsummarizedCount >= summarySettings.smallSummary.threshold) {
+            const startFloor = summarizedCount + 1;
+            const endFloor = Math.min(summarizedCount + summarySettings.smallSummary.threshold, summarizableLength);
+
+            console.log(`[自动总结] 自动触发: ${startFloor} 至 ${endFloor} 楼`);
+            await executeSmallSummary(startFloor, endFloor, true);
+        }
+    } catch (error) {
+        console.error('[自动总结] 自动检查失败:', error);
+    }
+}
 
 // 自动绑定世界书到聊天
 async function bindWorldbookToChat(worldbookName) {
     const context = getContext();
-    
+
     try {
         // 方法1：优先尝试使用TavernHelper API（如果存在）
         if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
@@ -118,20 +619,20 @@ async function bindWorldbookToChat(worldbookName) {
             console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
             return true;
         }
-        
+
         // 方法2：直接修改chat_metadata并触发保存
         if (!context.chat_metadata) {
             context.chat_metadata = {};
         }
-        
+
         context.chat_metadata.world_info = worldbookName;
-        
+
         // 触发SillyTavern的聊天保存机制
         // 使用eventSource触发CHAT_CHANGED事件，让ST自动保存
         if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
             eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
         }
-        
+
         console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
         console.log(`[角色日志] 提示: 请确保保存当前聊天以持久化此设置`);
         return true;
@@ -145,7 +646,7 @@ async function bindWorldbookToChat(worldbookName) {
 async function getTargetLorebookName() {
     const settings = extension_settings[extensionName];
     const context = getContext();
-    
+
     if (settings.target === "dedicated") {
         // 专用世界书模式：使用用户指定的固定世界书
         if (settings.dedicatedWorldbook && settings.dedicatedWorldbook.trim()) {
@@ -155,13 +656,13 @@ async function getTargetLorebookName() {
             return `CharacterJournal-${chatId}`;
         }
     }
-    
+
     // character_main 模式：根据角色名自动生成世界书
     const charName = context.name2 || "角色";
     const worldbookName = `${charName}日志`;
-    
+
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
-    
+
     // 检查世界书是否存在
     try {
         await loadWorldInfo(worldbookName);
@@ -169,17 +670,17 @@ async function getTargetLorebookName() {
     } catch (error) {
         // 世界书不存在，自动创建
         console.log(`[角色日志] ✗ 世界书不存在，开始自动创建: ${worldbookName}`);
-        
+
         const newBookData = {
             entries: {},
             name: worldbookName
         };
-        
+
         try {
             await saveWorldInfo(worldbookName, newBookData, true);
             console.log(`[角色日志] ✓ 成功创建世界书: ${worldbookName}`);
             toastr.success(`已自动创建世界书: ${worldbookName}`, '角色日志');
-            
+
             // 自动绑定到聊天
             const bindSuccess = await bindWorldbookToChat(worldbookName);
             if (bindSuccess) {
@@ -190,7 +691,7 @@ async function getTargetLorebookName() {
             toastr.error(`创建世界书失败: ${createError.message}`, '角色日志');
         }
     }
-    
+
     return worldbookName;
 }
 
@@ -202,19 +703,19 @@ async function readJournalProgress(lorebookName, characterName) {
             console.log(`[角色日志] ${characterName}: 世界书无数据`);
             return 0;
         }
-        
+
         const journalEntry = Object.values(bookData.entries).find(
             e => e.comment === `${JOURNAL_COMMENT_PREFIX}${characterName}` && !e.disable
         );
-        
+
         if (!journalEntry) {
             console.log(`[角色日志] ${characterName}: 未找到条目 (comment应为: ${JOURNAL_COMMENT_PREFIX}${characterName})`);
             return 0;
         }
-        
+
         console.log(`[角色日志] ${characterName}: 找到条目，content长度=${journalEntry.content.length}`);
         console.log(`[角色日志] ${characterName}: content末尾100字符:`, journalEntry.content.slice(-100));
-        
+
         const match = journalEntry.content.match(PROGRESS_SEAL_REGEX);
         if (match) {
             console.log(`[角色日志] ${characterName}: 成功匹配进度 ${match[1]}楼`);
@@ -236,27 +737,27 @@ function extractContentTag(text) {
     if (contentMatch && contentMatch[1].trim()) {
         return contentMatch[1].trim();
     }
-    
+
     // 如果没有content标签，返回原文本
     // 但要移除其他标签（thinking, tableEdit, chat, details等）
     let cleaned = text;
-    
+
     // 移除thinking标签及内容
     cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/g, '');
-    
+
     // 移除tableEdit标签及内容
     cleaned = cleaned.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/g, '');
-    
+
     // 移除chat标签及内容
     cleaned = cleaned.replace(/<chat>[\s\S]*?<\/chat>/g, '');
-    
+
     // 移除details标签及内容（包括折叠的手机、状态等）
     cleaned = cleaned.replace(/<details>[\s\S]*?<\/details>/g, '');
-    
+
     // 移除其他常见标签
     cleaned = cleaned.replace(/<Phone>[\s\S]*?<\/Phone>/g, '');
     cleaned = cleaned.replace(/<StatusBlocks>[\s\S]*?<\/StatusBlocks>/g, '');
-    
+
     return cleaned.trim();
 }
 
@@ -264,27 +765,27 @@ function extractContentTag(text) {
 function getUnloggedMessages(startFloor, endFloor, characterName) {
     const context = getContext();
     const chat = context.chat;
-    
+
     if (!chat || chat.length === 0) return [];
-    
+
     // 确保startFloor至少从第2楼开始，跳过第1楼（可能包含其他扩展的缓存数据）
     const safeStartFloor = Math.max(startFloor, 2);
-    
+
     if (safeStartFloor > endFloor) {
         console.log('[角色日志] 跳过第1楼后没有可读取的消息');
         return [];
     }
-    
+
     const historySlice = chat.slice(safeStartFloor - 1, endFloor);
     const userName = context.name1 || '用户';
-    
+
     console.log(`[角色日志] 实际读取范围: 第${safeStartFloor}-${endFloor}楼 (已排除第1楼)`);
-    
+
     return historySlice.map((msg, index) => {
         const author = msg.is_user ? userName : (msg.name || context.name2 || '角色');
         // 提取content标签内容
         const cleanedContent = extractContentTag(msg.mes);
-        
+
         return {
             floor: safeStartFloor + index,
             author: author,
@@ -304,10 +805,10 @@ async function callAI(messages, retryCount = 0) {
     const settings = extension_settings[extensionName];
     const MAX_RETRIES = 3;
     const RETRY_DELAYS = [5000, 10000, 20000]; // 5秒、10秒、20秒
-    
+
     console.log('[角色日志] callAI开始', retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : '');
     console.log('[角色日志] 是否使用自定义API:', !!settings.api.url);
-    
+
     // 如果有自定义API设置
     if (settings.api.url) {
         try {
@@ -320,21 +821,21 @@ async function callAI(messages, retryCount = 0) {
                     apiUrl += '/v1/chat/completions';
                 }
             }
-            
+
             console.log('[角色日志] 自定义API URL:', apiUrl);
             console.log('[角色日志] 模型:', settings.api.model);
             console.log('[角色日志] max_tokens:', settings.api.maxTokens);
-            
+
             const requestBody = {
                 model: settings.api.model || 'gpt-3.5-turbo',
                 messages: messages,
                 temperature: 0.7,
                 max_tokens: parseInt(settings.api.maxTokens) || 2000
             };
-            
+
             console.log('[角色日志] 请求体大小:', JSON.stringify(requestBody).length, '字符');
             console.log('[角色日志] 发送API请求...');
-            
+
             const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
@@ -343,13 +844,13 @@ async function callAI(messages, retryCount = 0) {
                 },
                 body: JSON.stringify(requestBody)
             });
-            
+
             console.log('[角色日志] API响应状态:', response.status);
-            
+
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error('[角色日志] API错误响应:', errorText);
-                
+
                 // 检查是否应该重试
                 const shouldRetry = retryCount < MAX_RETRIES && (
                     response.status === 429 || // Too Many Requests
@@ -358,64 +859,64 @@ async function callAI(messages, retryCount = 0) {
                     response.status === 503 || // Service Unavailable
                     response.status === 504    // Gateway Timeout
                 );
-                
+
                 if (shouldRetry) {
                     const delay = RETRY_DELAYS[retryCount];
-                    console.log(`[角色日志] 第${retryCount + 1}次尝试失败(${response.status})，${delay/1000}秒后重试...`);
-                    toastr.warning(`API调用失败(${response.status})，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', {timeOut: delay});
-                    
+                    console.log(`[角色日志] 第${retryCount + 1}次尝试失败(${response.status})，${delay / 1000}秒后重试...`);
+                    toastr.warning(`API调用失败(${response.status})，${delay / 1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', { timeOut: delay });
+
                     await sleep(delay);
                     return await callAI(messages, retryCount + 1);
                 }
-                
+
                 throw new Error(`API请求失败: ${response.status} - ${errorText.substring(0, 200)}`);
             }
-            
+
             const data = await response.json();
             console.log('[角色日志] API返回数据结构:', Object.keys(data));
-            
+
             if (!data.choices || !data.choices[0] || !data.choices[0].message) {
                 console.error('[角色日志] API返回数据异常:', data);
                 throw new Error('API返回数据格式不正确');
             }
-            
+
             const content = data.choices[0].message.content;
             console.log('[角色日志] 提取到内容长度:', content?.length || 0);
-            
+
             // 成功后提示（如果之前有重试）
             if (retryCount > 0) {
                 toastr.success(`API调用成功(经过${retryCount}次重试)`, '角色日志');
             }
-            
+
             return content;
         } catch (error) {
             // 网络错误也应该重试
-            const isNetworkError = error.message.includes('fetch') || 
-                                  error.message.includes('network') || 
-                                  error.message.includes('timeout');
-            
+            const isNetworkError = error.message.includes('fetch') ||
+                error.message.includes('network') ||
+                error.message.includes('timeout');
+
             if (isNetworkError && retryCount < MAX_RETRIES) {
                 const delay = RETRY_DELAYS[retryCount];
-                console.log(`[角色日志] 网络错误，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`);
-                toastr.warning(`网络错误，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', {timeOut: delay});
-                
+                console.log(`[角色日志] 网络错误，${delay / 1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`);
+                toastr.warning(`网络错误，${delay / 1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', { timeOut: delay });
+
                 await sleep(delay);
                 return await callAI(messages, retryCount + 1);
             }
-            
+
             console.error('[角色日志] API调用失败:', error);
             console.error('[角色日志] 错误堆栈:', error.stack);
-            
+
             if (retryCount >= MAX_RETRIES) {
                 toastr.error(`API调用失败(已重试${MAX_RETRIES}次): ${error.message}`, '角色日志');
             } else {
                 toastr.error(`API调用失败: ${error.message}`, '角色日志');
             }
-            
+
             return null;
         }
     }
-    
+
     // 使用SillyTavern的默认API
     try {
         console.log('[角色日志] 使用ST默认API');
@@ -423,26 +924,26 @@ async function callAI(messages, retryCount = 0) {
         if (!generateRaw) {
             throw new Error('找不到SillyTavern的生成函数');
         }
-        
+
         const prompt = messages.map(m => m.content).join('\n\n');
         console.log('[角色日志] 合并后的提示词长度:', prompt.length);
         console.log('[角色日志] 调用generateRaw...');
-        
+
         const result = await generateRaw(prompt, '', false, false);
-        
+
         console.log('[角色日志] generateRaw返回结果长度:', result?.length || 0);
         return result;
     } catch (error) {
         // ST API也应该支持重试
         if (retryCount < MAX_RETRIES) {
             const delay = RETRY_DELAYS[retryCount];
-            console.log(`[角色日志] ST API错误，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`);
-            toastr.warning(`生成失败，${delay/1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', {timeOut: delay});
-            
+            console.log(`[角色日志] ST API错误，${delay / 1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`);
+            toastr.warning(`生成失败，${delay / 1000}秒后重试(${retryCount + 1}/${MAX_RETRIES})...`, '角色日志', { timeOut: delay });
+
             await sleep(delay);
             return await callAI(messages, retryCount + 1);
         }
-        
+
         console.error('[角色日志] 调用ST API失败:', error);
         console.error('[角色日志] 错误堆栈:', error.stack);
         toastr.error(`生成日志失败(已重试${MAX_RETRIES}次): ${error.message}`, '角色日志');
@@ -453,15 +954,15 @@ async function callAI(messages, retryCount = 0) {
 // 解析角色日志
 function parseCharacterJournals(response, allowedCharacters = null) {
     const journals = new Map();
-    
+
     // 匹配格式: ===角色:Name===\n内容\n
     const regex = /===角色:([^=]+)===\s*\n([\s\S]*?)(?=\n===角色:|===END===|$)/g;
     let match;
-    
+
     while ((match = regex.exec(response)) !== null) {
         const characterName = match[1].trim();
         const journalContent = match[2].trim();
-        
+
         // 白名单过滤：如果指定了允许的角色列表，只处理列表中的角色
         if (allowedCharacters && allowedCharacters.length > 0) {
             if (!allowedCharacters.includes(characterName)) {
@@ -469,46 +970,46 @@ function parseCharacterJournals(response, allowedCharacters = null) {
                 continue;
             }
         }
-        
+
         if (journalContent && !journalContent.includes('【本轮未出场】')) {
             journals.set(characterName, journalContent);
         }
     }
-    
+
     return journals;
 }
 
 // 智能过滤角色（仅保留出场次数过滤）
 async function filterCharacters(characters, messages) {
     const settings = extension_settings[extensionName];
-    
+
     // 如果未启用过滤，直接返回
     if (!settings.filterEnabled) {
         console.log('[角色日志] 出场次数过滤已禁用');
         return characters;
     }
-    
+
     // 如果最小出场次数为0，不过滤
     if (settings.minAppearances <= 0) {
         console.log('[角色日志] 最小出场次数为0，跳过过滤');
         return characters;
     }
-    
+
     console.log(`[角色日志] 开始出场次数过滤，待过滤角色数: ${characters.length}`);
-    
+
     const filtered = [];
-    
+
     // 合并所有对话文本用于统计出场次数
     const fullChatText = messages.map(m => m.content).join('\n');
-    
+
     for (const char of characters) {
         const charName = char.name || char;
-        
+
         // 统计名字在对话中出现的次数
         const regex = new RegExp(charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
         const matches = fullChatText.match(regex);
         const appearanceCount = matches ? matches.length : 0;
-        
+
         if (appearanceCount < settings.minAppearances) {
             console.log(`[角色日志] ❌ 过滤角色: ${charName} - 出场次数不足(${appearanceCount}次 < ${settings.minAppearances}次)`);
         } else {
@@ -516,7 +1017,7 @@ async function filterCharacters(characters, messages) {
             filtered.push(char);
         }
     }
-    
+
     console.log(`[角色日志] 出场次数过滤完成: ${characters.length} -> ${filtered.length}`);
     return filtered;
 }
@@ -527,11 +1028,11 @@ async function detectCharactersByAI(messages, existingCharacters = []) {
     const settings = extension_settings[extensionName];
     const userName = context.name1 || '用户';
     const mainCharName = context.name2 || '角色';
-    
+
     const formattedHistory = messages
         .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
         .join('\n');
-    
+
     // 获取排除列表
     const excludeList = [mainCharName]; // 总是排除角色卡名字
     if (settings.excludeUser) {
@@ -545,7 +1046,7 @@ async function detectCharactersByAI(messages, existingCharacters = []) {
         excludeList.push(...existingCharacters);
         console.log('[角色日志] 排除已有角色:', existingCharacters);
     }
-    
+
     const detectPrompt = `你是角色识别助手。请分析以下对话记录，识别出**重要的女性角色名字**。
 
 🔴 严格要求：
@@ -575,27 +1076,27 @@ async function detectCharactersByAI(messages, existingCharacters = []) {
 ${formattedHistory}
 
 请直接输出角色名列表（格式：角色1, 角色2, 角色3）：`;
-    
+
     const aiMessages = [
         { role: 'user', content: detectPrompt }
     ];
-    
+
     console.log('[角色日志] 让AI识别角色...');
     const response = await callAI(aiMessages);
-    
+
     if (!response) {
         return [];
     }
-    
+
     // 解析AI返回的角色列表
     const detectedNames = response
         .replace(/^.*?[:：]\s*/, '') // 移除可能的前缀
         .split(/[,，、]/)
         .map(name => name.trim())
         .filter(name => name && name !== '无' && !excludeList.includes(name));
-    
+
     console.log('[角色日志] AI识别到的角色:', detectedNames.join(', '));
-    
+
     return detectedNames.map(name => ({
         name: name,
         count: 0,
@@ -609,13 +1110,13 @@ async function getCharacterWorldInfo(characterName) {
         const context = getContext();
         const chatMetadata = context.chat_metadata || {};
         const worldbooks = [];
-        
+
         // 获取当前聊天绑定的世界书
         if (chatMetadata.world_info) {
             worldbooks.push(chatMetadata.world_info);
             console.log(`[角色日志] 添加聊天世界书: ${chatMetadata.world_info}`);
         }
-        
+
         // 获取角色卡绑定的世界书（使用正确的路径）
         if (context.characterId !== undefined) {
             const char = characters[context.characterId];
@@ -625,27 +1126,27 @@ async function getCharacterWorldInfo(characterName) {
                 console.log(`[角色日志] 添加角色世界书: ${worldbookName}`);
             }
         }
-        
+
         let characterInfo = '';
-        
+
         // 遍历所有世界书，查找与该角色相关的条目
         for (const bookName of worldbooks) {
             try {
                 const bookData = await loadWorldInfo(bookName);
                 if (!bookData || !bookData.entries) continue;
-                
+
                 // 查找包含该角色名的条目
                 const relevantEntries = Object.values(bookData.entries).filter(entry => {
                     if (entry.disable) return false;
-                    
+
                     // 检查关键词是否包含角色名
                     const allKeys = [...(entry.key || []), ...(entry.keysecondary || [])];
-                    return allKeys.some(key => 
+                    return allKeys.some(key =>
                         key.toLowerCase().includes(characterName.toLowerCase()) ||
                         characterName.toLowerCase().includes(key.toLowerCase())
                     );
                 });
-                
+
                 // 提取相关信息
                 for (const entry of relevantEntries) {
                     if (entry.content && !entry.comment?.includes('Journal') && !entry.comment?.includes('Archive')) {
@@ -656,7 +1157,7 @@ async function getCharacterWorldInfo(characterName) {
                 console.log(`[角色日志] 无法读取世界书 ${bookName}`);
             }
         }
-        
+
         return characterInfo.trim();
     } catch (error) {
         console.error('[角色日志] 获取角色信息失败:', error);
@@ -668,20 +1169,20 @@ async function getCharacterWorldInfo(characterName) {
 async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
     const settings = extension_settings[extensionName];
     const messages = getUnloggedMessages(startFloor, endFloor, null);
-    
+
     if (messages.length === 0) {
         toastr.warning('选定范围内没有有效消息', '角色日志');
         return null;
     }
-    
+
     const formattedHistory = messages
         .map(m => `【第 ${m.floor} 楼】 ${m.author}: ${m.content}`)
         .join('\n');
-    
+
     // 根据检测模式获取角色列表
     let finalCharacters;
     let isManualMode = false; // 标记是否为手动输入模式
-    
+
     // 如果有明确指定的角色列表，直接使用
     if (rangeInfo && rangeInfo.characters && rangeInfo.characters.length > 0) {
         finalCharacters = rangeInfo.characters.map(name => ({
@@ -696,18 +1197,18 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
             .split(',')
             .map(name => name.trim())
             .filter(Boolean);
-        
+
         if (manualNames.length === 0) {
             toastr.warning('请在设置中填写要跟踪的角色名', '角色日志');
             return null;
         }
-        
+
         finalCharacters = manualNames.map(name => ({
             name: name,
             count: 0,
             isUser: false
         }));
-        
+
         isManualMode = true; // 标记为手动模式
         console.log('[角色日志] 手动模式 - 使用用户指定的角色（不应用出场次数过滤）:', manualNames);
     } else {
@@ -716,44 +1217,44 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
         // 如果有传入已存在的角色列表，传递给AI识别函数用于排除
         const existingChars = rangeInfo?.existingCharacters || [];
         finalCharacters = await detectCharactersByAI(messages, existingChars);
-        
+
         if (!finalCharacters || finalCharacters.length === 0) {
             console.log('[角色日志] AI未识别到新角色（可能都已存在）');
             toastr.warning('AI未能识别到新角色', '角色日志');
             return null;
         }
     }
-    
+
     // 🔧 统一应用出场次数过滤（手动模式除外）
     if (!isManualMode && settings.filterEnabled && settings.minAppearances > 0) {
         toastr.info('正在应用出场次数过滤...', '角色日志');
-        
+
         const beforeCount = finalCharacters.length;
         finalCharacters = await filterCharacters(finalCharacters, messages);
         const afterCount = finalCharacters.length;
-        
+
         if (afterCount < beforeCount) {
             console.log(`[角色日志] 出场次数过滤: ${beforeCount} -> ${afterCount} (过滤掉 ${beforeCount - afterCount} 个)`);
             toastr.info(`出场次数过滤: 保留 ${afterCount}/${beforeCount} 个角色`, '角色日志');
         }
-        
+
         if (finalCharacters.length === 0) {
             console.log('[角色日志] 出场次数过滤后无剩余角色');
             toastr.warning('所有识别的角色都被过滤掉了（出场次数不足）', '角色日志');
             return null;
         }
     }
-    
+
     const characterList = finalCharacters.map(c => c.name).join(', ');
-    
+
     // 构建包含角色资料的提示
     let characterInfoSection = '';
-    
+
     // 根据设置决定是否读取世界书
     if (settings.useWorldInfo) {
         toastr.info('正在获取角色资料...', '角色日志');
         const characterInfoMap = new Map();
-        
+
         for (const char of finalCharacters) {
             const info = await getCharacterWorldInfo(char.name);
             if (info) {
@@ -761,7 +1262,7 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
                 console.log(`[角色日志] 获取到${char.name}的资料:`, info.substring(0, 50) + '...');
             }
         }
-        
+
         if (characterInfoMap.size > 0) {
             characterInfoSection = '\n\n===角色资料===\n';
             for (const [name, info] of characterInfoMap.entries()) {
@@ -769,60 +1270,60 @@ async function generateCharacterJournals(startFloor, endFloor, rangeInfo) {
             }
             characterInfoSection += '===资料结束===\n';
         }
-        
+
         console.log('[角色日志] 包含角色资料数:', characterInfoMap.size);
     } else {
         console.log('[角色日志] 已禁用世界书读取，跳过角色资料获取');
     }
-    
+
     const aiMessages = [
-        { 
-            role: 'system', 
-            content: settings.journalPrompt 
+        {
+            role: 'system',
+            content: settings.journalPrompt
         },
-        { 
-            role: 'user', 
-            content: `要跟踪的角色: ${characterList}${characterInfoSection}\n对话记录:\n${formattedHistory}` 
+        {
+            role: 'user',
+            content: `要跟踪的角色: ${characterList}${characterInfoSection}\n对话记录:\n${formattedHistory}`
         }
     ];
-    
+
     console.log('[角色日志] 发送给AI的角色列表:', characterList);
     console.log('[角色日志] 对话记录长度:', formattedHistory.length);
-    
+
     toastr.info('正在生成角色日志...', '角色日志');
-    
+
     console.log('[角色日志] 开始调用AI...');
     console.log('[角色日志] 消息内容长度:', JSON.stringify(aiMessages).length, '字符');
-    
+
     const response = await callAI(aiMessages);
-    
+
     console.log('[角色日志] AI调用完成');
-    
+
     if (!response) {
         console.error('[角色日志] AI返回空响应');
         toastr.error('AI未返回任何内容', '角色日志');
         return null;
     }
-    
+
     console.log('[角色日志] AI响应长度:', response.length, '字符');
     console.log('[角色日志] AI响应内容:', response.substring(0, 500) + '...');
-    
+
     // 传递允许的角色列表进行白名单过滤
     const allowedNames = finalCharacters.map(c => c.name);
     const journals = parseCharacterJournals(response, allowedNames);
     console.log('[角色日志] 解析结果:', Array.from(journals.keys()));
     console.log('[角色日志] 允许的角色:', allowedNames);
-    
+
     return journals;
 }
 
 // 更新角色日志条目
 async function updateCharacterJournal(characterName, journalContent, startFloor, endFloor) {
     const settings = extension_settings[extensionName];
-    
+
     try {
         const lorebookName = await getTargetLorebookName();
-        
+
         let bookData;
         try {
             bookData = await loadWorldInfo(lorebookName);
@@ -833,34 +1334,45 @@ async function updateCharacterJournal(characterName, journalContent, startFloor,
                 name: lorebookName
             };
         }
-        
+
         if (!bookData.entries) {
             bookData.entries = {};
         }
-        
+
         const journalComment = `${JOURNAL_COMMENT_PREFIX}${characterName}`;
         let journalEntry = Object.values(bookData.entries).find(
             e => e.comment === journalComment && !e.disable
         );
-        
+
         const newSeal = `【已更新至第 ${endFloor} 楼】`;
         const newEntry = `\n\n---\n\n【第${startFloor}-${endFloor}楼】\n${journalContent}\n\n${newSeal}`;
-        
+
         if (journalEntry) {
             // 更新现有条目
             const contentWithoutSeal = journalEntry.content.replace(PROGRESS_SEAL_REGEX, "").trim();
             journalEntry.content = contentWithoutSeal + newEntry;
         } else {
-            // 创建新条目
-            const entryKey = Date.now().toString() + '-' + characterName;
+            // 创建新条目 - 使用0-999范围内的UID，避免数字超标
+            function getNextAvailableUid(entries) {
+                const usedUids = new Set(Object.keys(entries).map(k => parseInt(k, 10)));
+                for (let uid = 0; uid <= 999; uid++) {
+                    if (!usedUids.has(uid)) {
+                        return uid.toString();
+                    }
+                }
+                // 如果0-999全部用完，从1000开始
+                return Object.keys(entries).length.toString();
+            }
+
+            const entryKey = getNextAvailableUid(bookData.entries);
             const keywords = settings.keywordsTemplate
                 .replace(/{name}/g, characterName)
                 .split(',')
                 .map(k => k.trim())
                 .filter(Boolean);
-            
+
             journalEntry = {
-                uid: entryKey,
+                uid: parseInt(entryKey, 10),  // 使用数字类型的UID
                 key: keywords,
                 keysecondary: [],
                 comment: journalComment,
@@ -892,23 +1404,23 @@ async function updateCharacterJournal(characterName, journalContent, startFloor,
                 cooldown: 0,
                 delay: 0
             };
-            
+
             bookData.entries[entryKey] = journalEntry;
         }
-        
+
         await saveWorldInfo(lorebookName, bookData, true);
-        
+
         console.log(`[角色日志] ${characterName}的日志已更新`);
-        
+
         // 检查是否需要精炼
         if (settings.autoRefine && journalEntry.content.length >= settings.refineThreshold) {
             console.log(`[角色日志] ${characterName}的日志达到精炼阈值，自动触发精炼`);
             toastr.info(`${characterName}的日志达到阈值，正在自动精炼...`, '角色日志');
-            
+
             // 自动执行精炼
             await refineCharacterJournal(characterName, lorebookName);
         }
-        
+
         return true;
     } catch (error) {
         console.error(`[角色日志] 更新${characterName}的日志失败:`, error);
@@ -921,14 +1433,14 @@ async function updateCharacterJournal(characterName, journalContent, startFloor,
 async function checkAndAutoUpdate() {
     const settings = extension_settings[extensionName];
     const context = getContext();
-    
+
     if (!context.chat || context.chat.length === 0) {
         return;
     }
-    
+
     try {
         const lorebookName = await getTargetLorebookName();
-        
+
         // 读取所有角色的进度
         const characterProgresses = new Map();
         try {
@@ -937,7 +1449,7 @@ async function checkAndAutoUpdate() {
                 const journalEntries = Object.values(bookData.entries).filter(
                     e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
                 );
-                
+
                 for (const entry of journalEntries) {
                     const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
                     const match = entry.content.match(PROGRESS_SEAL_REGEX);
@@ -949,27 +1461,27 @@ async function checkAndAutoUpdate() {
             console.log('[角色日志] 无法读取现有进度');
             return;
         }
-        
+
         console.log(`[角色日志] ========== 自动更新检查 ==========`);
         console.log(`[角色日志] 对话总长度: ${context.chat.length} 楼`);
         console.log(`[角色日志] 更新阈值: ${settings.updateThreshold} 楼`);
         console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
-        
+
         // 🔧 修复：使用最大进度作为基准判断
-        const maxProgress = characterProgresses.size > 0 
-            ? Math.max(...Array.from(characterProgresses.values())) 
+        const maxProgress = characterProgresses.size > 0
+            ? Math.max(...Array.from(characterProgresses.values()))
             : 0;
-        
+
         console.log(`[角色日志] 全局最大进度: ${maxProgress} 楼`);
-        
+
         // 🔧 关键修复：只看最大进度到当前楼层的差值
         const unloggedCount = context.chat.length - maxProgress;
         console.log(`[角色日志] 未记录楼层数: ${unloggedCount} 楼 (${context.chat.length} - ${maxProgress})`);
-        
+
         const shouldUpdate = unloggedCount >= settings.updateThreshold;
         console.log(`[角色日志] 是否触发更新: ${shouldUpdate} (${unloggedCount} >= ${settings.updateThreshold})`);
         console.log(`[角色日志] =====================================`);
-        
+
         if (shouldUpdate) {
             console.log('[角色日志] ✓ 达到阈值，触发自动更新');
             toastr.info(`达到更新阈值(${unloggedCount}楼)，自动更新角色日志...`, '角色日志');
@@ -977,7 +1489,7 @@ async function checkAndAutoUpdate() {
         } else {
             console.log(`[角色日志] ✗ 未达到阈值，跳过 (还需${settings.updateThreshold - unloggedCount}楼)`);
         }
-        
+
     } catch (error) {
         console.error('[角色日志] 自动检查失败:', error);
     }
@@ -987,15 +1499,15 @@ async function checkAndAutoUpdate() {
 async function executeJournalUpdate() {
     const settings = extension_settings[extensionName];
     const context = getContext();
-    
+
     if (!context.chat || context.chat.length === 0) {
         toastr.warning('当前没有对话', '角色日志');
         return false;
     }
-    
+
     try {
         const lorebookName = await getTargetLorebookName();
-        
+
         // 读取所有已存在的角色及其进度
         const characterProgresses = new Map();
         try {
@@ -1004,7 +1516,7 @@ async function executeJournalUpdate() {
                 const journalEntries = Object.values(bookData.entries).filter(
                     e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
                 );
-                
+
                 for (const entry of journalEntries) {
                     const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
                     const match = entry.content.match(PROGRESS_SEAL_REGEX);
@@ -1015,25 +1527,25 @@ async function executeJournalUpdate() {
         } catch (error) {
             console.log('[角色日志] 无法读取现有进度，将自动识别角色');
         }
-        
+
         console.log(`[角色日志] 手动更新: 对话总长度 ${context.chat.length} 楼`);
         console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
-        
+
         let updateRanges = [];
-        
+
         if (characterProgresses.size > 0) {
             // ✅ 修复：找出最大进度
             const maxProgress = Math.max(...Array.from(characterProgresses.values()));
             const allCharacters = Array.from(characterProgresses.keys());
-            
+
             console.log(`[角色日志] 所有角色的最大进度: ${maxProgress}楼`);
             console.log(`[角色日志] 🔧 将调用AI识别 ${maxProgress + 1}楼往后出场的角色（包括已有角色）`);
-            
+
             // 🔧 核心修复：从最大进度往后，让AI识别每个范围内实际出场的角色（包括已有角色）
             let currentFloor = maxProgress + 1;
             while (currentFloor <= context.chat.length) {
                 const batchEnd = Math.min(currentFloor + settings.updateThreshold - 1, context.chat.length);
-                
+
                 updateRanges.push({
                     characters: null, // 让AI识别所有出场角色
                     startFloor: currentFloor,
@@ -1041,11 +1553,11 @@ async function executeJournalUpdate() {
                     isExisting: false
                     // ✅ 修复：不传 existingCharacters，让AI识别所有出场角色（包括已有的）
                 });
-                
+
                 console.log(`[角色日志] 添加AI识别范围: ${currentFloor}-${batchEnd}楼 (AI将识别所有实际出场的角色)`);
                 currentFloor = batchEnd + 1;
             }
-            
+
             if (updateRanges.length === 0) {
                 toastr.info('所有已跟踪的角色日志都是最新的', '角色日志');
             }
@@ -1060,12 +1572,12 @@ async function executeJournalUpdate() {
                 isExisting: false
             });
         }
-        
+
         if (updateRanges.length === 0) {
             toastr.info('所有角色日志都是最新的', '角色日志');
             return false;
         }
-        
+
         // 按楼层范围合并相同的更新
         const rangeMap = new Map();
         for (const range of updateRanges) {
@@ -1079,32 +1591,32 @@ async function executeJournalUpdate() {
                 }
             }
         }
-        
+
         console.log(`[角色日志] 总共 ${rangeMap.size} 个更新任务`);
-        
+
         // 🎯 修复：记录真正失败的情况（AI识别出场但生成失败，或API错误）
         const failedRanges = [];
-        
+
         // 执行更新
         let totalSuccessCount = 0;
         let taskIndex = 0;
         for (const range of rangeMap.values()) {
             taskIndex++;
-            const taskInfo = range.characters 
+            const taskInfo = range.characters
                 ? `更新 ${range.characters.join(', ')} (${range.startFloor}-${range.endFloor}楼)`
                 : `AI识别并生成 (${range.startFloor}-${range.endFloor}楼)`;
-            
+
             console.log(`[角色日志] 任务 ${taskIndex}/${rangeMap.size}: ${taskInfo}`);
-            
+
             // 传递range对象，其中可能包含existingCharacters信息
             const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
-            
+
             if (!journals || journals.size === 0) {
                 console.log('[角色日志] 本任务未生成任何日志（可能无角色出场）');
                 // ❌ 不再将"未生成日志"视为失败，因为可能是真的没有角色出场
                 continue;
             }
-            
+
             // 更新每个角色的日志条目
             for (const [charName, journalContent] of journals.entries()) {
                 const success = await updateCharacterJournal(charName, journalContent, range.startFloor, range.endFloor);
@@ -1123,12 +1635,12 @@ async function executeJournalUpdate() {
                     });
                 }
             }
-            
+
             console.log(`[角色日志] 本任务成功更新 ${journals.size} 个角色`);
         }
-        
+
         console.log('[角色日志] 手动更新全部完成');
-        
+
         // 🎯 如果有失败的范围，弹窗询问是否重试
         if (failedRanges.length > 0) {
             await showRetryDialog(failedRanges, 'manual');
@@ -1140,7 +1652,7 @@ async function executeJournalUpdate() {
             toastr.warning('未能生成任何日志', '角色日志');
             return false;
         }
-        
+
         await updateStatus();
         return totalSuccessCount > 0;
     } catch (error) {
@@ -1154,17 +1666,17 @@ async function executeJournalUpdate() {
 async function updateStatus() {
     const settings = extension_settings[extensionName];
     const context = getContext();
-    
+
     if (!context.chat) {
         $('#cj_status_display').html('未加载对话');
         $('#detected_characters_display').html('<span style="color: #999;">AI将在更新时识别角色</span>');
         return;
     }
-    
+
     try {
         const lorebookName = await getTargetLorebookName();
         const totalMessages = context.chat.length;
-        
+
         // 从世界书中读取已存在的角色日志
         let trackedCharacters = [];
         let maxProgress = 0;
@@ -1174,41 +1686,41 @@ async function updateStatus() {
                 const journalEntries = Object.values(bookData.entries).filter(
                     e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
                 );
-                
+
                 trackedCharacters = journalEntries.map(entry => {
                     const charName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
                     const match = entry.content.match(PROGRESS_SEAL_REGEX);
                     const progress = match ? parseInt(match[1], 10) : 0;
-                    
+
                     // 更新最大进度
                     if (progress > maxProgress) {
                         maxProgress = progress;
                     }
-                    
+
                     return { name: charName, progress: progress };
                 });
             }
         } catch (error) {
             console.log('[角色日志] 无法读取世界书');
         }
-        
+
         // 更新检测到的角色显示
         if (trackedCharacters.length > 0) {
-            const charBadges = trackedCharacters.map(c => 
+            const charBadges = trackedCharacters.map(c =>
                 `<span class="character-badge detected">${c.name}</span>`
             ).join('');
             $('#detected_characters_display').html(charBadges);
         } else {
             $('#detected_characters_display').html('<span style="color: #999;">AI将在更新时识别角色</span>');
         }
-        
+
         // 计算自动触发信息
         const unloggedCount = totalMessages - maxProgress;
         const needMoreFloors = Math.max(0, settings.updateThreshold - unloggedCount);
         const nextTriggerFloor = maxProgress + settings.updateThreshold;
-        
+
         let statusHtml = '';
-        
+
         // 已记录/待记录状态
         if (trackedCharacters.length > 0) {
             statusHtml += `<strong>📝 记录状态：</strong><br>`;
@@ -1218,12 +1730,12 @@ async function updateStatus() {
             }
             statusHtml += `<br>`;
         }
-        
+
         // 自动触发状态
         if (settings.enabled && settings.autoUpdate) {
             statusHtml += `<strong>🎯 自动触发：</strong><br>`;
             statusHtml += `• 自动触发阈值: ${settings.updateThreshold} 楼<br>`;
-            
+
             if (unloggedCount >= settings.updateThreshold) {
                 statusHtml += `• <span style="color: #27ae60; font-weight: bold;">✓ 已达到阈值，将在下次消息时触发</span><br>`;
             } else if (trackedCharacters.length > 0) {
@@ -1238,7 +1750,7 @@ async function updateStatus() {
             statusHtml += `• <span style="color: #999;">自动更新未启用</span><br>`;
             statusHtml += `<br>`;
         }
-        
+
         // 当前状态
         statusHtml += `<strong>当前状态：</strong><br>`;
         statusHtml += `• 功能状态: ${settings.enabled ? '✓ 已启用' : '✗ 未启用'}<br>`;
@@ -1246,10 +1758,10 @@ async function updateStatus() {
         statusHtml += `• 对话长度: ${totalMessages} 楼<br>`;
         statusHtml += `• 跟踪角色数: ${trackedCharacters.length}<br>`;
         statusHtml += `<br>`;
-        
+
         // 各角色进度
         statusHtml += `<strong>📊 各角色进度：</strong><br>`;
-        
+
         if (trackedCharacters.length > 0) {
             for (const char of trackedCharacters) {
                 const percentage = totalMessages > 0 ? Math.round((char.progress / totalMessages) * 100) : 0;
@@ -1258,7 +1770,7 @@ async function updateStatus() {
         } else {
             statusHtml += `<span style="color: #999;">暂无角色日志，点击"手动更新"开始</span><br>`;
         }
-        
+
         $('#cj_status_display').html(statusHtml);
     } catch (error) {
         console.error('[角色日志] 更新状态失败:', error);
@@ -1277,9 +1789,14 @@ function loadSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = defaultSettings;
     }
-    
+
     const settings = extension_settings[extensionName];
-    
+
+    // 确保 autoSummary 设置存在
+    if (!settings.autoSummary) {
+        settings.autoSummary = defaultSettings.autoSummary;
+    }
+
     $('#cj_enabled').prop('checked', settings.enabled);
     $('#cj_target').val(settings.target);
     $('#cj_dedicated_worldbook').val(settings.dedicatedWorldbook || '');
@@ -1289,42 +1806,70 @@ function loadSettings() {
     $('#cj_exclude_user').prop('checked', settings.excludeUser);
     $('#cj_auto_update').prop('checked', settings.autoUpdate);
     $('#cj_use_worldinfo').prop('checked', settings.useWorldInfo);
-    
+
     // 加载智能过滤设置
     $('#cj_filter_enabled').prop('checked', settings.filterEnabled !== undefined ? settings.filterEnabled : true);
     $('#cj_min_appearances').val(settings.minAppearances !== undefined ? settings.minAppearances : 5);
-    
+
     // 根据target值显示/隐藏专用世界书字段
     if (settings.target === 'dedicated') {
         $('#cj_dedicated_worldbook_field').show();
     } else {
         $('#cj_dedicated_worldbook_field').hide();
     }
-    
+
     $('#cj_update_threshold').val(settings.updateThreshold);
     $('#cj_journal_prompt').val(settings.journalPrompt);
-    
+
     $('#cj_auto_refine').prop('checked', settings.autoRefine);
     $('#cj_refine_threshold').val(settings.refineThreshold);
     $('#cj_refine_prompt').val(settings.refinePrompt);
-    
+
     $('#cj_keywords_template').val(settings.keywordsTemplate);
     $('#cj_insertion_position').val(settings.insertionPosition);
     $('#cj_entry_order').val(settings.entryOrder);
     $('#cj_depth').val(settings.depth);
-    
+
     $('#cj_api_url').val(settings.api.url);
     $('#cj_api_key').val(settings.api.key);
     $('#cj_api_model').val(settings.api.model);
     $('#cj_api_max_tokens').val(settings.api.maxTokens);
-    
+
+    // ========== 加载自动总结设置 ==========
+    const summarySettings = settings.autoSummary;
+    $('#as_enabled').prop('checked', summarySettings.enabled);
+    $('#as_target').val(summarySettings.target);
+    $('#as_dedicated_worldbook').val(summarySettings.dedicatedWorldbook || '');
+    $('#as_retention_count').val(summarySettings.retentionCount);
+
+    // 小总结设置
+    $('#as_small_auto_enabled').prop('checked', summarySettings.smallSummary.autoEnabled);
+    $('#as_small_threshold').val(summarySettings.smallSummary.threshold);
+    $('#as_small_interactive').prop('checked', summarySettings.smallSummary.interactive);
+    $('#as_small_prompt').val(summarySettings.smallSummary.prompt);
+
+    // 大总结设置
+    $('#as_large_auto_enabled').prop('checked', summarySettings.largeSummary.autoEnabled);
+    $('#as_large_token_threshold').val(summarySettings.largeSummary.tokenThreshold);
+    $('#as_large_prompt').val(summarySettings.largeSummary.prompt);
+
+    // 标签提取设置
+    $('#as_tag_extraction_enabled').prop('checked', summarySettings.tagExtraction.enabled);
+    $('#as_extraction_tags').val(summarySettings.tagExtraction.tags);
+
+    // 世界书条目设置
+    $('#as_lore_activation_mode').val(summarySettings.lore.activationMode);
+    $('#as_lore_keywords').val(summarySettings.lore.keywords);
+    $('#as_lore_insertion_position').val(summarySettings.lore.insertionPosition);
+    $('#as_lore_depth').val(summarySettings.lore.depth);
+
     updateStatus();
 }
 
 // 保存设置
 function saveSettings() {
     const settings = extension_settings[extensionName];
-    
+
     settings.enabled = $('#cj_enabled').prop('checked');
     settings.target = $('#cj_target').val();
     settings.dedicatedWorldbook = $('#cj_dedicated_worldbook').val();
@@ -1334,28 +1879,60 @@ function saveSettings() {
     settings.excludeUser = $('#cj_exclude_user').prop('checked');
     settings.autoUpdate = $('#cj_auto_update').prop('checked');
     settings.useWorldInfo = $('#cj_use_worldinfo').prop('checked');
-    
+
     // 保存智能过滤设置
     settings.filterEnabled = $('#cj_filter_enabled').prop('checked');
     settings.minAppearances = parseInt($('#cj_min_appearances').val());
-    
+
     settings.updateThreshold = parseInt($('#cj_update_threshold').val());
     settings.journalPrompt = $('#cj_journal_prompt').val();
-    
+
     settings.autoRefine = $('#cj_auto_refine').prop('checked');
     settings.refineThreshold = parseInt($('#cj_refine_threshold').val());
     settings.refinePrompt = $('#cj_refine_prompt').val();
-    
+
     settings.keywordsTemplate = $('#cj_keywords_template').val();
     settings.insertionPosition = parseInt($('#cj_insertion_position').val());
     settings.entryOrder = parseInt($('#cj_entry_order').val());
     settings.depth = parseInt($('#cj_depth').val());
-    
+
     settings.api.url = $('#cj_api_url').val();
     settings.api.key = $('#cj_api_key').val();
     settings.api.model = $('#cj_api_model').val();
     settings.api.maxTokens = parseInt($('#cj_api_max_tokens').val());
-    
+
+    // ========== 保存自动总结设置 ==========
+    if (!settings.autoSummary) {
+        settings.autoSummary = defaultSettings.autoSummary;
+    }
+    const summarySettings = settings.autoSummary;
+
+    summarySettings.enabled = $('#as_enabled').prop('checked');
+    summarySettings.target = $('#as_target').val();
+    summarySettings.dedicatedWorldbook = $('#as_dedicated_worldbook').val();
+    summarySettings.retentionCount = parseInt($('#as_retention_count').val()) || 5;
+
+    // 小总结设置
+    summarySettings.smallSummary.autoEnabled = $('#as_small_auto_enabled').prop('checked');
+    summarySettings.smallSummary.threshold = parseInt($('#as_small_threshold').val()) || 20;
+    summarySettings.smallSummary.interactive = $('#as_small_interactive').prop('checked');
+    summarySettings.smallSummary.prompt = $('#as_small_prompt').val();
+
+    // 大总结设置
+    summarySettings.largeSummary.autoEnabled = $('#as_large_auto_enabled').prop('checked');
+    summarySettings.largeSummary.tokenThreshold = parseInt($('#as_large_token_threshold').val()) || 5000;
+    summarySettings.largeSummary.prompt = $('#as_large_prompt').val();
+
+    // 标签提取设置
+    summarySettings.tagExtraction.enabled = $('#as_tag_extraction_enabled').prop('checked');
+    summarySettings.tagExtraction.tags = $('#as_extraction_tags').val();
+
+    // 世界书条目设置
+    summarySettings.lore.activationMode = $('#as_lore_activation_mode').val();
+    summarySettings.lore.keywords = $('#as_lore_keywords').val();
+    summarySettings.lore.insertionPosition = parseInt($('#as_lore_insertion_position').val()) || 2;
+    summarySettings.lore.depth = parseInt($('#as_lore_depth').val()) || 4;
+
     saveSettingsDebounced();
     updateStatus();
 }
@@ -1365,15 +1942,15 @@ async function testAPIConnection() {
     const apiUrl = $('#cj_api_url').val().trim();
     const apiKey = $('#cj_api_key').val().trim();
     const statusDiv = $('#cj_api_status');
-    
+
     statusDiv.show().html('🔄 正在测试连接...').css('color', '#4a90e2');
-    
+
     try {
         if (!apiUrl) {
             statusDiv.html('⚠️ 请先填写API地址').css('color', '#e74c3c');
             return;
         }
-        
+
         let modelsUrl = apiUrl;
         if (!modelsUrl.endsWith('/v1/models')) {
             if (modelsUrl.endsWith('/')) {
@@ -1387,7 +1964,7 @@ async function testAPIConnection() {
                 modelsUrl += '/v1/models';
             }
         }
-        
+
         const response = await fetch(modelsUrl, {
             method: 'GET',
             headers: {
@@ -1395,18 +1972,18 @@ async function testAPIConnection() {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
-        
+
         const data = await response.json();
         const modelCount = data.data ? data.data.length : 0;
-        
+
         statusDiv.html(`✓ 连接成功！找到 ${modelCount} 个模型`).css('color', '#27ae60');
         toastr.success('API连接测试成功', '角色日志');
-        
+
         setTimeout(() => {
             statusDiv.fadeOut();
         }, 3000);
@@ -1422,15 +1999,15 @@ async function fetchModels() {
     const apiUrl = $('#cj_api_url').val().trim();
     const apiKey = $('#cj_api_key').val().trim();
     const modelInput = $('#cj_api_model');
-    
+
     if (!apiUrl) {
         toastr.warning('请先填写API地址', '角色日志');
         return;
     }
-    
+
     const btn = $('#cj_fetch_models');
     btn.prop('disabled', true).text('拉取中...');
-    
+
     try {
         let modelsUrl = apiUrl;
         if (!modelsUrl.endsWith('/v1/models')) {
@@ -1445,9 +2022,9 @@ async function fetchModels() {
                 modelsUrl += '/v1/models';
             }
         }
-        
+
         console.log('[角色日志] 拉取模型列表:', modelsUrl);
-        
+
         const response = await fetch(modelsUrl, {
             method: 'GET',
             headers: {
@@ -1455,23 +2032,23 @@ async function fetchModels() {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
-        
+
         const data = await response.json();
-        
+
         if (!data.data || data.data.length === 0) {
             toastr.warning('未找到可用模型', '角色日志');
             return;
         }
-        
+
         // 创建模型选择对话框
         const models = data.data.map(m => m.id || m.model || m.name).filter(Boolean);
         console.log('[角色日志] 找到模型:', models);
-        
+
         const modalHtml = `
             <div class="character-journal-modal" id="model_select_modal">
                 <div class="character-journal-modal-content" style="max-width: 600px;">
@@ -1493,31 +2070,31 @@ async function fetchModels() {
                 </div>
             </div>
         `;
-        
+
         $('body').append(modalHtml);
-        
+
         // 点击模型项选择
-        $('.character-list-item[data-model]').on('click', function() {
+        $('.character-list-item[data-model]').on('click', function () {
             const selectedModel = $(this).attr('data-model');
             modelInput.val(selectedModel);
             $('#model_select_modal').remove();
             toastr.success(`已选择模型: ${selectedModel}`, '角色日志');
         });
-        
+
         // 关闭按钮
-        $('#close_model_modal').on('click', function() {
+        $('#close_model_modal').on('click', function () {
             $('#model_select_modal').remove();
         });
-        
+
         // 点击背景关闭
-        $('#model_select_modal').on('click', function(e) {
+        $('#model_select_modal').on('click', function (e) {
             if (e.target.id === 'model_select_modal') {
                 $(this).remove();
             }
         });
-        
+
         toastr.success(`找到 ${models.length} 个模型`, '角色日志');
-        
+
     } catch (error) {
         console.error('[角色日志] 拉取模型失败:', error);
         toastr.error(`拉取模型失败: ${error.message}`, '角色日志');
@@ -1531,28 +2108,28 @@ async function refineAllJournals() {
     if (!confirm('确定要精炼所有角色的日志吗？这会将旧日志归档并压缩。')) {
         return;
     }
-    
+
     try {
         const lorebookName = await getTargetLorebookName();
         const bookData = await loadWorldInfo(lorebookName);
-        
+
         if (!bookData || !bookData.entries) {
             toastr.info('没有找到日志条目', '角色日志');
             return;
         }
-        
+
         // 找出所有日志条目
         const journalEntries = Object.values(bookData.entries).filter(
             e => e.comment && e.comment.startsWith(JOURNAL_COMMENT_PREFIX) && !e.disable
         );
-        
+
         if (journalEntries.length === 0) {
             toastr.info('没有找到需要精炼的日志', '角色日志');
             return;
         }
-        
+
         toastr.info(`开始精炼 ${journalEntries.length} 个角色的日志...`, '角色日志');
-        
+
         let successCount = 0;
         for (const entry of journalEntries) {
             const characterName = entry.comment.replace(JOURNAL_COMMENT_PREFIX, '');
@@ -1561,7 +2138,7 @@ async function refineAllJournals() {
                 successCount++;
             }
         }
-        
+
         if (successCount > 0) {
             toastr.success(`成功精炼了 ${successCount} 个角色的日志`, '角色日志');
             await updateStatus();
@@ -1577,73 +2154,73 @@ async function refineAllJournals() {
 // 精炼单个角色的日志
 async function refineCharacterJournal(characterName, lorebookName) {
     const settings = extension_settings[extensionName];
-    
+
     try {
         const bookData = await loadWorldInfo(lorebookName);
         if (!bookData || !bookData.entries) {
             toastr.error('无法读取世界书', '角色日志');
             return false;
         }
-        
+
         // 找到该角色的日志条目
         const journalComment = `${JOURNAL_COMMENT_PREFIX}${characterName}`;
         const journalEntry = Object.values(bookData.entries).find(
             e => e.comment === journalComment && !e.disable
         );
-        
+
         if (!journalEntry) {
             toastr.warning(`未找到${characterName}的日志条目`, '角色日志');
             return false;
         }
-        
+
         // 提取内容
         const content = journalEntry.content;
-        
+
         // 提取头部（角色名的第一人称日志记录：）
         const headerMatch = content.match(/^(.+?的第一人称日志记录：)/);
         const header = headerMatch ? headerMatch[1] : `${characterName}的第一人称日志记录：`;
-        
+
         // 移除头部，获取所有日志内容（包括可能已存在的精炼摘要）
         let contentWithoutHeader = content.replace(/^.+?的第一人称日志记录：\s*/, '');
-        
+
         // 移除进度封印
         contentWithoutHeader = contentWithoutHeader.replace(PROGRESS_SEAL_REGEX, '').trim();
-        
+
         // 检查是否为空或内容太少
         if (!contentWithoutHeader || contentWithoutHeader.length < 100) {
             toastr.info(`${characterName}的日志内容太少，无需精炼`, '角色日志');
             return false;
         }
-        
+
         // 调用AI精炼所有内容
         const refineMessages = [
             { role: 'system', content: settings.refinePrompt },
             { role: 'user', content: `角色名: ${characterName}\n\n需要精炼的日志:\n${contentWithoutHeader}` }
         ];
-        
+
         console.log(`[角色日志] 精炼${characterName}的日志，内容长度: ${contentWithoutHeader.length}`);
         toastr.info(`正在精炼${characterName}的日志...`, '角色日志');
-        
+
         const refinedSummary = await callAI(refineMessages);
-        
+
         if (!refinedSummary) {
             toastr.error(`精炼${characterName}的日志失败`, '角色日志');
             return false;
         }
-        
+
         // 获取当前进度（从原内容中提取）
         const progressMatch = content.match(PROGRESS_SEAL_REGEX);
         const currentProgress = progressMatch ? progressMatch[1] : '0';
-        
+
         // 用精炼摘要覆盖原内容
         journalEntry.content = `${header}\n\n【精炼摘要】\n${refinedSummary}\n\n【已更新至第 ${currentProgress} 楼】`;
-        
+
         // 保存世界书
         await saveWorldInfo(lorebookName, bookData, true);
-        
+
         console.log(`[角色日志] ${characterName}的日志精炼完成`);
         toastr.success(`${characterName}的日志已精炼为摘要`, '角色日志');
-        
+
         return true;
     } catch (error) {
         console.error(`[角色日志] 精炼${characterName}的日志失败:`, error);
@@ -1657,34 +2234,34 @@ async function clearAllJournals() {
     if (!confirm('确定要清空所有角色日志和归档条目吗？此操作不可恢复！')) {
         return;
     }
-    
+
     try {
         const lorebookName = await getTargetLorebookName();
         const bookData = await loadWorldInfo(lorebookName);
-        
+
         if (!bookData || !bookData.entries) {
             toastr.info('没有找到日志条目', '角色日志');
             return;
         }
-        
+
         // 找出所有日志条目和归档条目
         let deletedCount = 0;
         const entriesToDelete = [];
-        
+
         for (const [key, entry] of Object.entries(bookData.entries)) {
-            if (entry.comment && 
-                (entry.comment.startsWith(JOURNAL_COMMENT_PREFIX) || 
-                 entry.comment.startsWith(ARCHIVE_COMMENT_PREFIX))) {
+            if (entry.comment &&
+                (entry.comment.startsWith(JOURNAL_COMMENT_PREFIX) ||
+                    entry.comment.startsWith(ARCHIVE_COMMENT_PREFIX))) {
                 entriesToDelete.push(key);
             }
         }
-        
+
         // 删除条目
         for (const key of entriesToDelete) {
             delete bookData.entries[key];
             deletedCount++;
         }
-        
+
         if (deletedCount > 0) {
             await saveWorldInfo(lorebookName, bookData, true);
             toastr.success(`已清空 ${deletedCount} 个条目（包括日志和归档）`, '角色日志');
@@ -1702,14 +2279,14 @@ async function clearAllJournals() {
 async function batchUpdateRange() {
     const context = getContext();
     const settings = extension_settings[extensionName];
-    
+
     if (!context.chat || context.chat.length === 0) {
         toastr.warning('当前没有对话', '角色日志');
         return;
     }
-    
+
     const totalMessages = context.chat.length;
-    
+
     // 创建输入对话框（支持拖拽和最小化）
     const modalHtml = `
         <div class="character-journal-modal" id="batch_update_modal">
@@ -1761,38 +2338,38 @@ async function batchUpdateRange() {
             </div>
         </div>
     `;
-    
+
     $('body').append(modalHtml);
-    
+
     let isUpdating = false;
-    
+
     // 开始更新按钮
-    $('#start_batch_update').on('click', async function() {
+    $('#start_batch_update').on('click', async function () {
         if (isUpdating) return;
-        
+
         const startFloor = parseInt($('#batch_start_floor').val());
         const endFloor = parseInt($('#batch_end_floor').val());
-        
+
         if (isNaN(startFloor) || isNaN(endFloor)) {
             toastr.error('请输入有效的楼层数字', '角色日志');
             return;
         }
-        
+
         if (startFloor < 1 || endFloor > totalMessages) {
             toastr.error(`楼层范围必须在 1-${totalMessages} 之间`, '角色日志');
             return;
         }
-        
+
         if (startFloor > endFloor) {
             toastr.error('起始楼层不能大于结束楼层', '角色日志');
             return;
         }
-        
+
         isUpdating = true;
         $('#start_batch_update').prop('disabled', true).text('更新中...');
         $('#cancel_batch_update').prop('disabled', true);
         $('#batch_progress_display').show();
-        
+
         try {
             await executeBatchUpdate(startFloor, endFloor);
             toastr.success('批量更新完成！', '角色日志');
@@ -1807,21 +2384,21 @@ async function batchUpdateRange() {
             isUpdating = false;
         }
     });
-    
+
     // 取消按钮
-    $('#cancel_batch_update').on('click', function() {
+    $('#cancel_batch_update').on('click', function () {
         if (!isUpdating) {
             $('#batch_update_modal').remove();
         }
     });
-    
+
     // 点击背景关闭（仅在未更新时）
-    $('#batch_update_modal').on('click', function(e) {
+    $('#batch_update_modal').on('click', function (e) {
         if (e.target.id === 'batch_update_modal' && !isUpdating) {
             $(this).remove();
         }
     });
-    
+
     // 初始化拖拽和最小化功能
     initModalDragAndMinimize('#batch_update_modal');
 }
@@ -1832,16 +2409,16 @@ function initModalDragAndMinimize(modalSelector) {
     const modalContent = modal.find('.character-journal-modal-content');
     const modalHeader = modal.find('.character-journal-modal-header');
     const minimizeBtn = modal.find('#minimize_batch_modal');
-    
+
     let isMinimized = false;
     let isDragging = false;
     let currentX, currentY, initialX, initialY;
     let xOffset = 0, yOffset = 0;
-    
+
     // 最小化/恢复功能
-    minimizeBtn.on('click', function(e) {
+    minimizeBtn.on('click', function (e) {
         e.stopPropagation();
-        
+
         if (isMinimized) {
             // 恢复
             modalContent.removeClass('minimized');
@@ -1856,17 +2433,17 @@ function initModalDragAndMinimize(modalSelector) {
             isMinimized = true;
         }
     });
-    
+
     // 拖拽功能
-    modalHeader.on('mousedown', function(e) {
+    modalHeader.on('mousedown', function (e) {
         // 如果点击的是按钮，不触发拖拽
         if ($(e.target).closest('.character-journal-modal-control-btn').length > 0) {
             return;
         }
-        
+
         isDragging = true;
         modalContent.addClass('draggable');
-        
+
         // 如果是居中状态，切换到固定定位
         if (modalContent.css('position') !== 'fixed') {
             const rect = modalContent[0].getBoundingClientRect();
@@ -1882,32 +2459,32 @@ function initModalDragAndMinimize(modalSelector) {
             xOffset = parseInt(modalContent.css('left')) || 0;
             yOffset = parseInt(modalContent.css('top')) || 0;
         }
-        
+
         initialX = e.clientX - xOffset;
         initialY = e.clientY - yOffset;
     });
-    
-    $(document).on('mousemove', function(e) {
+
+    $(document).on('mousemove', function (e) {
         if (isDragging) {
             e.preventDefault();
-            
+
             currentX = e.clientX - initialX;
             currentY = e.clientY - initialY;
-            
+
             xOffset = currentX;
             yOffset = currentY;
-            
+
             setTranslate(currentX, currentY, modalContent[0]);
         }
     });
-    
-    $(document).on('mouseup', function() {
+
+    $(document).on('mouseup', function () {
         if (isDragging) {
             isDragging = false;
             modalContent.removeClass('draggable');
         }
     });
-    
+
     function setTranslate(xPos, yPos, el) {
         el.style.left = xPos + 'px';
         el.style.top = yPos + 'px';
@@ -1919,31 +2496,31 @@ async function generateForSpecificCharacter() {
     const characterName = $('#cj_manual_character_name').val().trim();
     const messageCount = parseInt($('#cj_manual_message_count').val());
     const context = getContext();
-    
+
     if (!characterName) {
         toastr.warning('请输入角色名称', '角色日志');
         return;
     }
-    
+
     if (!context.chat || context.chat.length === 0) {
         toastr.warning('当前没有对话', '角色日志');
         return;
     }
-    
+
     if (isNaN(messageCount) || messageCount < 5 || messageCount > 200) {
         toastr.error('消息数必须在5-200之间', '角色日志');
         return;
     }
-    
+
     const totalMessages = context.chat.length;
     const endFloor = totalMessages;
     const startFloor = Math.max(1, endFloor - messageCount + 1);
-    
+
     console.log(`[角色日志] 手动生成 ${characterName} 的日志: 读取第${startFloor}-${endFloor}楼`);
-    
+
     try {
         toastr.info(`正在为 ${characterName} 生成日志...`, '角色日志');
-        
+
         // 构建rangeInfo，指定角色
         const rangeInfo = {
             characters: [characterName],
@@ -1951,30 +2528,30 @@ async function generateForSpecificCharacter() {
             endFloor: endFloor,
             isExisting: false
         };
-        
+
         // 调用生成函数
         const journals = await generateCharacterJournals(startFloor, endFloor, rangeInfo);
-        
+
         if (!journals || journals.size === 0) {
             toastr.warning(`未能为 ${characterName} 生成日志（可能该角色未出场或被过滤）`, '角色日志');
             return;
         }
-        
+
         // 检查是否成功生成了指定角色的日志
         if (!journals.has(characterName)) {
             toastr.warning(`未能为 ${characterName} 生成日志（可能未出场或不符合条件）`, '角色日志');
             return;
         }
-        
+
         const journalContent = journals.get(characterName);
-        
+
         // 更新或创建该角色的日志条目
         const success = await updateCharacterJournal(characterName, journalContent, startFloor, endFloor);
-        
+
         if (success) {
             toastr.success(`成功为 ${characterName} 生成日志！`, '角色日志');
             await updateStatus();
-            
+
             // 清空输入框
             $('#cj_manual_character_name').val('');
         }
@@ -1989,20 +2566,20 @@ async function executeBatchUpdate(startFloor, endFloor) {
     const settings = extension_settings[extensionName];
     const threshold = settings.updateThreshold;
     const lorebookName = await getTargetLorebookName();
-    
+
     console.log(`[角色日志] ========== 批量更新 ==========`);
     console.log(`[角色日志] 用户选定范围: ${startFloor}-${endFloor}楼`);
     console.log(`[角色日志] 更新阈值: ${threshold}楼/批`);
-    
+
     // ✅ 核心逻辑：统一使用AI识别，无论是否已有角色
     // 与自动/手动更新保持完全一致
     const updateRanges = [];
-    
+
     // 按阈值分批处理用户选定的范围
     let currentFloor = startFloor;
     while (currentFloor <= endFloor) {
         const batchEnd = Math.min(currentFloor + threshold - 1, endFloor);
-        
+
         updateRanges.push({
             characters: null, // 统一让AI识别所有出场角色（包括已有的）
             startFloor: currentFloor,
@@ -2010,17 +2587,17 @@ async function executeBatchUpdate(startFloor, endFloor) {
             isExisting: false
             // 🔧 关键：不传existingCharacters，让AI识别所有角色
         });
-        
+
         console.log(`[角色日志] 添加AI识别范围: ${currentFloor}-${batchEnd}楼`);
         currentFloor = batchEnd + 1;
     }
-    
+
     console.log(`[角色日志] 总共 ${updateRanges.length} 个AI识别任务`);
     console.log(`[角色日志] ===================================`);
-    
+
     let completedTasks = 0;
     const totalTasks = updateRanges.length;
-    
+
     // 更新进度显示
     function updateProgress(current, total, info) {
         const percentage = Math.round((current / total) * 100);
@@ -2028,17 +2605,17 @@ async function executeBatchUpdate(startFloor, endFloor) {
         $('#batch_progress_text').text(`${percentage}%`);
         $('#batch_progress_info').html(info);
     }
-    
+
     // 执行所有AI识别任务
     for (let i = 0; i < updateRanges.length; i++) {
         const range = updateRanges[i];
         const taskInfo = `AI识别并生成 (${range.startFloor}-${range.endFloor}楼)`;
-        
+
         console.log(`[角色日志] 任务 ${i + 1}/${updateRanges.length}: ${taskInfo}`);
         updateProgress(i, updateRanges.length, `任务 ${i + 1}/${updateRanges.length}: ${taskInfo}`);
-        
+
         const journals = await generateCharacterJournals(range.startFloor, range.endFloor, range);
-        
+
         if (journals && journals.size > 0) {
             for (const [charName, journalContent] of journals.entries()) {
                 await updateCharacterJournal(charName, journalContent, range.startFloor, range.endFloor);
@@ -2047,16 +2624,16 @@ async function executeBatchUpdate(startFloor, endFloor) {
         } else {
             console.log('[角色日志] 本任务未生成任何日志（可能无角色出场）');
         }
-        
+
         completedTasks++;
         updateProgress(completedTasks, updateRanges.length, `✓ 已完成 ${completedTasks}/${updateRanges.length} 个任务`);
-        
+
         // 短暂延迟避免API限流
         if (i < updateRanges.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
     }
-    
+
     console.log('[角色日志] 批量更新全部完成');
     console.log('[角色日志] ===================================');
 }
@@ -2064,32 +2641,32 @@ async function executeBatchUpdate(startFloor, endFloor) {
 // 🎯 显示重试对话框
 async function showRetryDialog(failedRanges, updateType) {
     console.log('[角色日志] 显示重试对话框，失败范围数:', failedRanges.length);
-    
+
     // 构建失败信息
     let failureInfo = '';
     let totalFailed = 0;
-    
+
     for (const fail of failedRanges) {
         const range = fail.range;
         failureInfo += `<div style="margin-bottom: 10px; padding: 10px; background: #fff3cd; border-radius: 4px;">`;
         failureInfo += `<strong>📍 范围: ${range.startFloor}-${range.endFloor}楼</strong><br>`;
-        
+
         if (fail.expectedCount > 0) {
             failureInfo += `<span style="color: #856404;">预期更新 ${fail.expectedCount} 个角色，实际成功 ${fail.actualCount} 个</span><br>`;
         }
-        
+
         if (fail.successChars.length > 0) {
             failureInfo += `<span style="color: #27ae60;">✓ 成功: ${fail.successChars.join(', ')}</span><br>`;
         }
-        
+
         if (fail.failedChars.length > 0) {
             failureInfo += `<span style="color: #e74c3c;">✗ 失败: ${fail.failedChars.join(', ')}</span>`;
             totalFailed += fail.failedChars.length;
         }
-        
+
         failureInfo += `</div>`;
     }
-    
+
     const modalHtml = `
         <div class="character-journal-modal" id="retry_dialog_modal">
             <div class="character-journal-modal-content" style="max-width: 600px;">
@@ -2128,29 +2705,29 @@ async function showRetryDialog(failedRanges, updateType) {
             </div>
         </div>
     `;
-    
+
     $('body').append(modalHtml);
-    
+
     // 等待用户响应
     return new Promise((resolve) => {
-        $('#confirm_retry').on('click', async function() {
+        $('#confirm_retry').on('click', async function () {
             $('#retry_dialog_modal').remove();
-            
+
             // 执行重试
             toastr.info('开始重试失败的角色...', '角色日志');
             await retryFailedRanges(failedRanges);
-            
+
             resolve(true);
         });
-        
-        $('#cancel_retry').on('click', function() {
+
+        $('#cancel_retry').on('click', function () {
             $('#retry_dialog_modal').remove();
             toastr.info('已取消重试', '角色日志');
             resolve(false);
         });
-        
+
         // 点击背景取消
-        $('#retry_dialog_modal').on('click', function(e) {
+        $('#retry_dialog_modal').on('click', function (e) {
             if (e.target.id === 'retry_dialog_modal') {
                 $(this).remove();
                 toastr.info('已取消重试', '角色日志');
@@ -2164,16 +2741,16 @@ async function showRetryDialog(failedRanges, updateType) {
 async function retryFailedRanges(failedRanges) {
     let totalRetrySuccess = 0;
     let totalRetryFailed = 0;
-    
+
     for (const fail of failedRanges) {
         const range = fail.range;
         const failedChars = fail.failedChars;
-        
+
         if (failedChars.length === 0) continue;
-        
+
         console.log(`[角色日志] 重试范围 ${range.startFloor}-${range.endFloor}，失败的角色:`, failedChars);
         toastr.info(`重试 ${range.startFloor}-${range.endFloor}楼 (${failedChars.join(', ')})`, '角色日志');
-        
+
         // 🔧 关键：只为失败的角色重新生成日志
         const retryRange = {
             characters: failedChars, // 只重试失败的角色
@@ -2182,10 +2759,10 @@ async function retryFailedRanges(failedRanges) {
             isExisting: true,
             isRetry: true // 标记为重试
         };
-        
+
         try {
             const journals = await generateCharacterJournals(range.startFloor, range.endFloor, retryRange);
-            
+
             if (journals && journals.size > 0) {
                 // 更新每个成功生成的角色
                 for (const [charName, journalContent] of journals.entries()) {
@@ -2206,11 +2783,11 @@ async function retryFailedRanges(failedRanges) {
             console.error(`[角色日志] 重试范围 ${range.startFloor}-${range.endFloor} 时出错:`, error);
             totalRetryFailed += failedChars.length;
         }
-        
+
         // 短暂延迟避免API限流
         await new Promise(resolve => setTimeout(resolve, 500));
     }
-    
+
     // 显示重试结果
     if (totalRetrySuccess > 0 && totalRetryFailed === 0) {
         toastr.success(`重试成功！更新了 ${totalRetrySuccess} 个角色的日志`, '角色日志');
@@ -2219,51 +2796,51 @@ async function retryFailedRanges(failedRanges) {
     } else {
         toastr.error(`重试失败：所有角色仍未能生成日志`, '角色日志');
     }
-    
+
     await updateStatus();
 }
 
 // 设置UI事件监听
 function setupUIHandlers() {
     // 保存设置按钮
-    $('#cj_save_settings').on('click', function() {
+    $('#cj_save_settings').on('click', function () {
         saveSettings();
         toastr.success('设置已保存', '角色日志');
     });
-    
+
     // 测试连接按钮
     $('#cj_test_api').on('click', testAPIConnection);
-    
+
     // 拉取模型按钮
     $('#cj_fetch_models').on('click', fetchModels);
-    
+
     // 手动更新按钮
-    $('#cj_manual_update').on('click', async function() {
+    $('#cj_manual_update').on('click', async function () {
         await executeJournalUpdate();
     });
-    
+
     // 批量更新按钮
-    $('#cj_batch_update').on('click', async function() {
+    $('#cj_batch_update').on('click', async function () {
         await batchUpdateRange();
     });
-    
+
     // 手动精炼按钮
-    $('#cj_manual_refine').on('click', async function() {
+    $('#cj_manual_refine').on('click', async function () {
         await refineAllJournals();
     });
-    
+
     // 清空日志按钮
-    $('#cj_clear_all').on('click', async function() {
+    $('#cj_clear_all').on('click', async function () {
         await clearAllJournals();
     });
-    
+
     // 刷新状态按钮
-    $('#cj_refresh_status').on('click', async function() {
+    $('#cj_refresh_status').on('click', async function () {
         console.log('[角色日志] 用户点击刷新状态按钮');
         const btn = $(this);
         const originalText = btn.html();
         btn.prop('disabled', true).html('🔄 刷新中...');
-        
+
         try {
             await updateStatus();
             toastr.success('状态已刷新', '角色日志');
@@ -2274,20 +2851,20 @@ function setupUIHandlers() {
             btn.prop('disabled', false).html(originalText);
         }
     });
-    
+
     // 检测模式改变时更新显示
-    $('#cj_detection_mode').on('change', function() {
+    $('#cj_detection_mode').on('change', function () {
         updateStatus();
     });
-    
-    $('#cj_manual_characters').on('input', function() {
+
+    $('#cj_manual_characters').on('input', function () {
         if ($('#cj_detection_mode').val() === 'manual') {
             updateStatus();
         }
     });
-    
+
     // 目标世界书改变时显示/隐藏专用世界书字段
-    $('#cj_target').on('change', function() {
+    $('#cj_target').on('change', function () {
         if ($(this).val() === 'dedicated') {
             $('#cj_dedicated_worldbook_field').slideDown();
         } else {
@@ -2295,9 +2872,66 @@ function setupUIHandlers() {
         }
         updateStatus();
     });
-    
+
     // 选择现有世界书按钮
     $('#cj_select_worldbook').on('click', selectWorldbook);
+
+    // ========== 自动总结模块 UI 事件 ==========
+
+    // 自动总结 - 目标世界书改变时显示/隐藏专用世界书字段
+    $('#as_target').on('change', function () {
+        if ($(this).val() === 'dedicated') {
+            $('#as_dedicated_worldbook_field').slideDown();
+        } else {
+            $('#as_dedicated_worldbook_field').slideUp();
+        }
+    });
+
+    // 执行小总结按钮
+    $('#as_execute_small').on('click', async function () {
+        const settings = extension_settings[extensionName];
+        const summarySettings = settings.autoSummary;
+
+        if (!summarySettings.enabled) {
+            toastr.warning('请先启用自动总结系统', '自动总结');
+            return;
+        }
+
+        try {
+            const context = getContext();
+            const lorebookName = await getAutoSummaryLorebookName();
+            const summarizedCount = await readAutoSummaryProgress(lorebookName);
+            const currentChatLength = context.chat.length;
+            const retentionCount = summarySettings.retentionCount || 5;
+            const summarizableLength = currentChatLength - retentionCount;
+
+            const startFloor = summarizedCount + 1;
+            const endFloor = summarizableLength;
+
+            if (startFloor > endFloor) {
+                toastr.warning('没有新消息需要总结', '自动总结');
+                return;
+            }
+
+            toastr.info(`将总结 ${startFloor}-${endFloor} 楼`, '自动总结');
+            await executeSmallSummary(startFloor, endFloor, false);
+        } catch (error) {
+            console.error('[自动总结] 执行小总结失败:', error);
+            toastr.error(`执行失败: ${error.message}`, '自动总结');
+        }
+    });
+
+    // 执行大总结按钮
+    $('#as_execute_large').on('click', async function () {
+        const settings = extension_settings[extensionName];
+
+        if (!settings.autoSummary || !settings.autoSummary.enabled) {
+            toastr.warning('请先启用自动总结系统', '自动总结');
+            return;
+        }
+
+        await executeLargeSummary();
+    });
 }
 
 // 选择现有世界书
@@ -2305,19 +2939,19 @@ async function selectWorldbook() {
     try {
         // 动态导入 world_names
         const { world_names } = await import('/scripts/world-info.js');
-        
+
         if (!world_names || world_names.length === 0) {
             toastr.info('没有找到世界书', '角色日志');
             return;
         }
-        
+
         // 处理世界书名称（去除.json后缀）
         const worldbooks = world_names.map(filename => {
             return filename.replace('.json', '');
         });
-        
+
         console.log('[角色日志] 找到世界书:', worldbooks);
-        
+
         // 创建世界书选择对话框
         const modalHtml = `
             <div class="character-journal-modal" id="worldbook_select_modal">
@@ -2340,29 +2974,29 @@ async function selectWorldbook() {
                 </div>
             </div>
         `;
-        
+
         $('body').append(modalHtml);
-        
+
         // 点击世界书项选择
-        $('.character-list-item[data-worldbook]').on('click', function() {
+        $('.character-list-item[data-worldbook]').on('click', function () {
             const selectedWorldbook = $(this).attr('data-worldbook');
             $('#cj_dedicated_worldbook').val(selectedWorldbook);
             $('#worldbook_select_modal').remove();
             toastr.success(`已选择世界书: ${selectedWorldbook}`, '角色日志');
         });
-        
+
         // 关闭按钮
-        $('#close_worldbook_modal').on('click', function() {
+        $('#close_worldbook_modal').on('click', function () {
             $('#worldbook_select_modal').remove();
         });
-        
+
         // 点击背景关闭
-        $('#worldbook_select_modal').on('click', function(e) {
+        $('#worldbook_select_modal').on('click', function (e) {
             if (e.target.id === 'worldbook_select_modal') {
                 $(this).remove();
             }
         });
-        
+
     } catch (error) {
         console.error('[角色日志] 选择世界书失败:', error);
         toastr.error(`选择世界书失败: ${error.message}`, '角色日志');
@@ -2373,10 +3007,10 @@ async function selectWorldbook() {
 jQuery(async () => {
     const settingsHtml = await $.get(`${extensionFolderPath}settings.html`);
     const settingsCss = await $.get(`${extensionFolderPath}style.css`);
-    
+
     // 注入样式
     $('<style>').text(settingsCss).appendTo('head');
-    
+
     // 创建扩展面板
     const extensionPanel = $(`
         <div class="inline-drawer">
@@ -2389,67 +3023,83 @@ jQuery(async () => {
             </div>
         </div>
     `);
-    
+
     $('#extensions_settings2').append(extensionPanel);
-    
+
     // 加载设置
     loadSettings();
-    
+
     // 设置事件监听
     setupUIHandlers();
-    
+
     // 监听聊天消息事件
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         const settings = extension_settings[extensionName];
+
+        // 角色日志系统
         if (settings.enabled) {
             updateStatus();
-            
-            // 自动更新功能
+
+            // 自动更新角色日志
             if (settings.autoUpdate) {
                 await checkAndAutoUpdate();
             }
         }
+
+        // 自动总结系统
+        if (settings.autoSummary && settings.autoSummary.enabled) {
+            await checkAndAutoSummary();
+        }
     });
-    
+
     eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
         updateStatus();
     });
-    
+
     // 监听角色切换事件
     eventSource.on(event_types.CHARACTER_SELECTED, async () => {
         const settings = extension_settings[extensionName];
         if (settings.enabled && settings.target === "character_main") {
             console.log('[角色日志] ========== 检测到角色切换 ==========');
-            
+
             const context = getContext();
             const newCharName = context.name2 || "角色";
             console.log(`[角色日志] 新角色: ${newCharName}`);
-            
+
             // 自动切换世界书
             const newWorldbook = await getTargetLorebookName();
             console.log(`[角色日志] 切换到世界书: ${newWorldbook}`);
             console.log('[角色日志] =====================================');
-            
+
             // 刷新状态显示
             await updateStatus();
-            
+
             toastr.info(`已加载 ${newWorldbook}`, '角色日志');
         }
     });
-    
+
     console.log('[角色日志系统] 扩展已加载');
-    
+
     // 加载新布局处理器
     const layoutHandlerScript = document.createElement('script');
     layoutHandlerScript.src = `${extensionFolderPath}new-layout-handler.js`;
     layoutHandlerScript.type = 'text/javascript';
     document.head.appendChild(layoutHandlerScript);
-    
+
     console.log('[角色日志系统] 新布局处理器已加载');
 });
 
 // 导出函数供新布局处理器调用
 window.characterJournal = {
     saveSettings: saveSettings,
-    generateForSpecificCharacter: generateForSpecificCharacter
+    generateForSpecificCharacter: generateForSpecificCharacter,
+
+    // 自动总结模块导出
+    autoSummary: {
+        executeSmall: executeSmallSummary,
+        executeLarge: executeLargeSummary,
+        checkAndAuto: checkAndAutoSummary,
+        getProgress: readAutoSummaryProgress,
+        getLorebookName: getAutoSummaryLorebookName
+    }
 };

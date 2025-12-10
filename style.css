@@ -490,3 +490,113 @@
 .character-journal-btn.primary:hover {
     background-color: #357abd;
 }
+
+/* ========== 自动总结模块样式 ========== */
+
+/* 自动总结标签页按钮 */
+.character-journal-tab.summary-tab {
+    background-color: rgba(142, 68, 173, 0.1);
+}
+
+.character-journal-tab.summary-tab.active {
+    background-color: #8e44ad;
+    color: white;
+    border-bottom-color: #8e44ad;
+}
+
+/* 自动总结区块样式 - 紫色主题 */
+.character-journal-section.as-section {
+    border-left-color: #8e44ad;
+}
+
+.character-journal-section.as-section h3 {
+    color: #6c3483;
+}
+
+/* 自动总结模态框样式 */
+.auto-summary-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.auto-summary-modal-content {
+    background-color: #ffffff;
+    border-radius: 10px;
+    width: 700px;
+    max-width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.auto-summary-modal-header {
+    padding: 15px 20px;
+    background-color: #8e44ad;
+    color: white;
+    border-radius: 10px 10px 0 0;
+}
+
+.auto-summary-modal-header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.auto-summary-modal-body {
+    padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.auto-summary-modal-body .summary-textarea {
+    width: 100%;
+    min-height: 300px;
+    padding: 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 13px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.auto-summary-modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.auto-summary-modal-footer .character-journal-btn {
+    background-color: #8e44ad;
+}
+
+.auto-summary-modal-footer .character-journal-btn:hover {
+    background-color: #6c3483;
+}
+
+.auto-summary-modal-footer .character-journal-btn.success {
+    background-color: #27ae60;
+}
+
+.auto-summary-modal-footer .character-journal-btn.success:hover {
+    background-color: #229954;
+}
+
+.auto-summary-modal-footer .character-journal-btn.danger {
+    background-color: #e74c3c;
+}
+
+.auto-summary-modal-footer .character-journal-btn.danger:hover {
+    background-color: #c0392b;
+}

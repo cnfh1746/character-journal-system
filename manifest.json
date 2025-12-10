@@ -1,12 +1,12 @@
 {
-    "display_name": "角色日志系统",
+    "display_name": "角色日志与剧情总结系统",
     "loading_order": 10,
     "requires": [],
     "optional": [],
     "js": "index.js",
     "css": "style.css",
     "author": "cnfh1746",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "homePage": "https://github.com/cnfh1746/character-journal-system",
     "auto_update": true
 }
