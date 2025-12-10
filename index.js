@@ -212,9 +212,12 @@ async function getAutoSummaryLorebookName() {
         }
     }
 
-    // character_main 模式
-    const charName = context.name2 || "角色";
-    return `${charName}日志`;
+    // character_main 模式 - 从角色卡读取绑定的世界书
+    const worldbook = characters[context.characterId]?.data?.extensions?.world;
+    if (!worldbook) {
+        throw new Error("当前角色未绑定主世界书");
+    }
+    return worldbook;
 }
 
 // 读取自动总结进度
