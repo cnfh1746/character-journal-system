@@ -696,11 +696,44 @@ async function getTargetLorebookName() {
 
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
 
-    // 检查世界书是否存在
+    // 🔧 关键修复：使用 world_names 列表准确判断世界书是否存在
+    // loadWorldInfo 在文件不存在时不会抛出错误，会返回无效数据
+    let worldbookExists = false;
     try {
-        await loadWorldInfo(worldbookName);
+        // 尝试从 SillyTavern 获取世界书列表
+        const worldInfoModule = await import('../../../world-info.js');
+        const allWorldbooks = worldInfoModule.world_names || [];
+        worldbookExists = allWorldbooks.includes(worldbookName);
+        console.log(`[角色日志] 世界书列表检测: ${worldbookName} 存在=${worldbookExists}`);
+    } catch (importError) {
+        // 如果无法导入，使用备用方法检测
+        console.log('[角色日志] 无法导入world-info模块，使用备用检测方法');
+        try {
+            const bookData = await loadWorldInfo(worldbookName);
+            // 检查返回数据是否真实有效（有效的世界书有entries对象）
+            worldbookExists = bookData && bookData.entries !== undefined && bookData.entries !== null;
+        } catch (e) {
+            worldbookExists = false;
+        }
+    }
+
+    if (worldbookExists) {
         console.log(`[角色日志] ✓ 找到世界书: ${worldbookName}`);
-    } catch (error) {
+
+        // 🔧 检查是否已绑定到当前聊天，如果未绑定则自动绑定
+        const currentBoundBook = context.chat_metadata?.world_info;
+        if (currentBoundBook !== worldbookName) {
+            console.log(`[角色日志] 世界书存在但未绑定，当前绑定: ${currentBoundBook || 'None'}`);
+
+            // 自动绑定
+            const bindSuccess = await bindWorldbookToChat(worldbookName);
+            if (bindSuccess) {
+                console.log(`[角色日志] ✓ 已自动补绑定世界书到当前聊天`);
+            }
+        } else {
+            console.log(`[角色日志] ✓ 世界书已正确绑定到当前聊天`);
+        }
+    } else {
         // 世界书不存在，自动创建
         console.log(`[角色日志] ✗ 世界书不存在，开始自动创建: ${worldbookName}`);
 
@@ -713,6 +746,9 @@ async function getTargetLorebookName() {
             await saveWorldInfo(worldbookName, newBookData, true);
             console.log(`[角色日志] ✓ 成功创建世界书: ${worldbookName}`);
             toastr.success(`已自动创建世界书: ${worldbookName}`, '角色日志');
+
+            // 等待文件系统操作完成
+            await new Promise(resolve => setTimeout(resolve, 200));
 
             // 自动绑定到聊天
             const bindSuccess = await bindWorldbookToChat(worldbookName);
