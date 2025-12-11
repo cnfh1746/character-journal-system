@@ -613,61 +613,47 @@ async function checkAndAutoSummary() {
 
 // 自动绑定世界书到聊天
 async function bindWorldbookToChat(worldbookName) {
+    const context = getContext();
+
     try {
         // 方法1：优先尝试使用TavernHelper API
         if (typeof TavernHelper !== 'undefined' && typeof TavernHelper.setChatLorebook === 'function') {
             await TavernHelper.setChatLorebook(worldbookName);
             console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
-            toastr.success(`已绑定到聊天世界书: ${worldbookName}`, '角色日志');
+            toastr.success(`已绑定聊天世界书: ${worldbookName}`, '角色日志');
             return true;
         }
 
-        console.log('[角色日志] TavernHelper.setChatLorebook未找到, 尝试UI模拟');
+        console.log('[角色日志] TavernHelper.setChatLorebook未找到, 尝试直接修改metadata');
 
-        // 方法2：模拟用户UI操作来绑定世界书
-        const chatLorebookBtn = document.querySelector('.chat_lorebook_button');
-        if (!chatLorebookBtn) {
-            console.log('[角色日志] 未找到聊天世界书按钮');
-            return false;
-        }
-        chatLorebookBtn.click();
+        // 方法2：直接修改 chat_metadata 并调用 saveMetadata
+        // 这是根据 修复试错.md 中尝试10 的成功方法
+        if (context.chat_metadata) {
+            context.chat_metadata.world_info = worldbookName;
 
-        // 等待弹窗出现
-        await new Promise(resolve => setTimeout(resolve, 300));
+            // 尝试保存metadata
+            if (typeof context.saveMetadata === 'function') {
+                await context.saveMetadata();
+                console.log(`[角色日志] ✓ 已通过saveMetadata绑定世界书: ${worldbookName}`);
+                toastr.success(`已绑定聊天世界书: ${worldbookName}`, '角色日志');
 
-        // 找到下拉选择器
-        const selector = document.querySelector('.chat_world_info_selector');
-        if (!selector) {
-            console.log('[角色日志] 未找到世界书选择器');
-            // 关闭弹窗
-            const cancelBtn = document.querySelector('.popup-button-cancel, .popup-button-close');
-            if (cancelBtn) cancelBtn.click();
-            return false;
-        }
-
-        // 检查世界书是否在选项中
-        const optionExists = Array.from(selector.options).some(opt => opt.value === worldbookName);
-        if (!optionExists) {
-            console.log(`[角色日志] 世界书 "${worldbookName}" 不在选项列表中，可能刚创建需要刷新`);
-            const cancelBtn = document.querySelector('.popup-button-cancel, .popup-button-close');
-            if (cancelBtn) cancelBtn.click();
-            return false;
+                // 触发UI刷新事件
+                if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
+                    eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+                }
+                return true;
+            } else {
+                // saveMetadata不存在，尝试触发聊天保存
+                console.log('[角色日志] saveMetadata不可用，尝试saveChatDebounced');
+                if (typeof saveChatDebounced === 'function') {
+                    saveChatDebounced();
+                }
+                toastr.info(`已设置聊天世界书: ${worldbookName}（需要保存聊天生效）`, '角色日志');
+                return true;
+            }
         }
 
-        // 设置值并触发change事件
-        selector.value = worldbookName;
-        selector.dispatchEvent(new Event('change', { bubbles: true }));
-
-        // 等待一下再点击OK
-        await new Promise(resolve => setTimeout(resolve, 100));
-        const okBtn = document.querySelector('.popup-button-ok');
-        if (okBtn) {
-            okBtn.click();
-            console.log(`[角色日志] ✓ 通过UI模拟绑定世界书: ${worldbookName}`);
-            toastr.success(`已绑定到聊天世界书: ${worldbookName}`, '角色日志');
-            return true;
-        }
-
+        console.log('[角色日志] chat_metadata不可用，绑定失败');
         return false;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
@@ -692,8 +678,15 @@ async function getTargetLorebookName() {
 
     // character_main 模式：根据角色名自动生成世界书
     const charName = context.name2 || "角色";
-    const worldbookName = `Z${charName}日志`;
 
+    // 🔧 过滤掉系统角色名，避免为SillyTavern System创建世界书
+    const invalidNames = ['SillyTavern System', 'System', '系统', 'undefined', 'null', '角色'];
+    if (invalidNames.includes(charName) || charName.toLowerCase().includes('sillytavern')) {
+        console.log(`[角色日志] 跳过系统角色: ${charName}`);
+        return null; // 返回null表示没有有效的目标世界书
+    }
+
+    const worldbookName = `Z${charName}日志`;
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
 
     // 🔧 关键修复：使用 world_names 列表准确判断世界书是否存在
