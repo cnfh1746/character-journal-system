@@ -613,32 +613,62 @@ async function checkAndAutoSummary() {
 
 // 自动绑定世界书到聊天
 async function bindWorldbookToChat(worldbookName) {
-    const context = getContext();
-
     try {
-        // 方法1：优先尝试使用TavernHelper API（如果存在）
-        if (typeof TavernHelper !== 'undefined' && TavernHelper.setChatLorebook) {
+        // 方法1：优先尝试使用TavernHelper API
+        if (typeof TavernHelper !== 'undefined' && typeof TavernHelper.setChatLorebook === 'function') {
             await TavernHelper.setChatLorebook(worldbookName);
             console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
+            toastr.success(`已绑定到聊天世界书: ${worldbookName}`, '角色日志');
             return true;
         }
 
-        // 方法2：直接修改chat_metadata并触发保存
-        if (!context.chat_metadata) {
-            context.chat_metadata = {};
+        console.log('[角色日志] TavernHelper.setChatLorebook未找到, 尝试UI模拟');
+
+        // 方法2：模拟用户UI操作来绑定世界书
+        const chatLorebookBtn = document.querySelector('.chat_lorebook_button');
+        if (!chatLorebookBtn) {
+            console.log('[角色日志] 未找到聊天世界书按钮');
+            return false;
+        }
+        chatLorebookBtn.click();
+
+        // 等待弹窗出现
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // 找到下拉选择器
+        const selector = document.querySelector('.chat_world_info_selector');
+        if (!selector) {
+            console.log('[角色日志] 未找到世界书选择器');
+            // 关闭弹窗
+            const cancelBtn = document.querySelector('.popup-button-cancel, .popup-button-close');
+            if (cancelBtn) cancelBtn.click();
+            return false;
         }
 
-        context.chat_metadata.world_info = worldbookName;
-
-        // 触发SillyTavern的聊天保存机制
-        // 使用eventSource触发CHAT_CHANGED事件，让ST自动保存
-        if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
-            eventSource.emit(event_types.WORLDINFO_SETTINGS_UPDATED);
+        // 检查世界书是否在选项中
+        const optionExists = Array.from(selector.options).some(opt => opt.value === worldbookName);
+        if (!optionExists) {
+            console.log(`[角色日志] 世界书 "${worldbookName}" 不在选项列表中，可能刚创建需要刷新`);
+            const cancelBtn = document.querySelector('.popup-button-cancel, .popup-button-close');
+            if (cancelBtn) cancelBtn.click();
+            return false;
         }
 
-        console.log(`[角色日志] ✓ 已设置聊天世界书: ${worldbookName}`);
-        console.log(`[角色日志] 提示: 请确保保存当前聊天以持久化此设置`);
-        return true;
+        // 设置值并触发change事件
+        selector.value = worldbookName;
+        selector.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // 等待一下再点击OK
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const okBtn = document.querySelector('.popup-button-ok');
+        if (okBtn) {
+            okBtn.click();
+            console.log(`[角色日志] ✓ 通过UI模拟绑定世界书: ${worldbookName}`);
+            toastr.success(`已绑定到聊天世界书: ${worldbookName}`, '角色日志');
+            return true;
+        }
+
+        return false;
     } catch (error) {
         console.error('[角色日志] 绑定世界书失败:', error);
         return false;
@@ -662,7 +692,7 @@ async function getTargetLorebookName() {
 
     // character_main 模式：根据角色名自动生成世界书
     const charName = context.name2 || "角色";
-    const worldbookName = `${charName}日志`;
+    const worldbookName = `Z${charName}日志`;
 
     console.log(`[角色日志] 当前角色: ${charName}, 目标世界书: ${worldbookName}`);
 
@@ -1534,11 +1564,63 @@ async function executeJournalUpdate() {
         console.log(`[角色日志] 手动更新: 对话总长度 ${context.chat.length} 楼`);
         console.log(`[角色日志] 已有角色数: ${characterProgresses.size}`);
 
+        // 🔧 追赶模式：检测待处理楼层是否过多
+        let effectiveThreshold = settings.updateThreshold;
+        const maxProgress = characterProgresses.size > 0
+            ? Math.max(...Array.from(characterProgresses.values()))
+            : 0;
+        const pendingFloors = context.chat.length - maxProgress;
+
+        if (pendingFloors > 40) {
+            // 弹窗让用户选择临时阈值
+            const estimatedTasks = Math.ceil(pendingFloors / settings.updateThreshold);
+            const estimatedCalls = estimatedTasks * 2;
+
+            const catchupThreshold = await new Promise((resolve) => {
+                const popup = document.createElement('div');
+                popup.innerHTML = `
+                    <div style="padding: 15px; max-width: 400px;">
+                        <h3 style="margin-top:0; color: #f0a030;">⚡ 检测到大量待处理楼层</h3>
+                        <p>待处理: <strong>${pendingFloors}</strong> 楼 (${maxProgress + 1} - ${context.chat.length})</p>
+                        <p>当前阈值: ${settings.updateThreshold} 楼/批次</p>
+                        <p>预计任务数: ${estimatedTasks} 个 (约 ${estimatedCalls} 次API调用)</p>
+                        <hr>
+                        <p><strong>选择本次追赶使用的阈值：</strong></p>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <button class="menu_button" data-value="40">40 楼/批次 (约 ${Math.ceil(pendingFloors / 40) * 2} 次调用)</button>
+                            <button class="menu_button" data-value="50">50 楼/批次 (约 ${Math.ceil(pendingFloors / 50) * 2} 次调用)</button>
+                            <button class="menu_button" data-value="80">80 楼/批次 (约 ${Math.ceil(pendingFloors / 80) * 2} 次调用)</button>
+                            <button class="menu_button" data-value="${settings.updateThreshold}">使用原阈值 ${settings.updateThreshold} 楼</button>
+                            <button class="menu_button" data-value="cancel" style="background: #555;">取消</button>
+                        </div>
+                    </div>
+                `;
+
+                popup.querySelectorAll('button').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const value = btn.dataset.value;
+                        callGenericPopup('', POPUP_TYPE.TEXT, '', { okButton: 'hidden', cancelButton: 'hidden' });
+                        resolve(value === 'cancel' ? null : parseInt(value, 10));
+                    });
+                });
+
+                callGenericPopup(popup, POPUP_TYPE.TEXT, '', { okButton: 'hidden', cancelButton: 'hidden' });
+            });
+
+            if (catchupThreshold === null) {
+                toastr.info('已取消更新', '角色日志');
+                return false;
+            }
+
+            effectiveThreshold = catchupThreshold;
+            console.log(`[角色日志] 用户选择追赶阈值: ${effectiveThreshold} 楼/批次`);
+            toastr.info(`使用 ${effectiveThreshold} 楼阈值进行追赶`, '角色日志');
+        }
+
         let updateRanges = [];
 
         if (characterProgresses.size > 0) {
-            // ✅ 修复：找出最大进度
-            const maxProgress = Math.max(...Array.from(characterProgresses.values()));
+            // maxProgress 已在上面计算过
             const allCharacters = Array.from(characterProgresses.keys());
 
             console.log(`[角色日志] 所有角色的最大进度: ${maxProgress}楼`);
@@ -1547,7 +1629,7 @@ async function executeJournalUpdate() {
             // 🔧 核心修复：从最大进度往后，让AI识别每个范围内实际出场的角色（包括已有角色）
             let currentFloor = maxProgress + 1;
             while (currentFloor <= context.chat.length) {
-                const batchEnd = Math.min(currentFloor + settings.updateThreshold - 1, context.chat.length);
+                const batchEnd = Math.min(currentFloor + effectiveThreshold - 1, context.chat.length);
 
                 updateRanges.push({
                     characters: null, // 让AI识别所有出场角色
@@ -1567,7 +1649,7 @@ async function executeJournalUpdate() {
         } else {
             // 没有任何日志，从头开始
             const startFloor = 1;
-            const endFloor = Math.min(settings.updateThreshold, context.chat.length);
+            const endFloor = Math.min(effectiveThreshold, context.chat.length);
             updateRanges.push({
                 characters: null, // AI自动识别
                 startFloor: startFloor,
@@ -1804,16 +1886,28 @@ async function updateStatus() {
         const retentionCount = summarySettings.retentionCount || 5;
         const summarizableLength = totalMessages - retentionCount;
         const unsummarizedCount = Math.max(0, summarizableLength - summarizedCount);
+        const threshold = summarySettings.smallSummary.threshold;
 
-        // 更新概览页的自动总结状态框
+        // 更新概览页的自动总结状态框 - 显示详细信息
         let asStatusHtml = '<strong>剧情推进状态：</strong><br>';
-        asStatusHtml += `已总结至 <strong>${summarizedCount}</strong> 楼<br>`;
+        asStatusHtml += `<span style="color: #27ae60;">✓ 已总结: 1-${summarizedCount} 楼</span><br>`;
+
         if (unsummarizedCount > 0) {
-            const color = unsummarizedCount >= summarySettings.smallSummary.threshold ? '#e74c3c' : '#f39c12';
-            asStatusHtml += `<span style="color: ${color};">待总结: ${unsummarizedCount} 楼</span>`;
+            const color = unsummarizedCount >= threshold ? '#e74c3c' : '#f39c12';
+            asStatusHtml += `<span style="color: ${color};">⏳ 待总结: ${summarizedCount + 1}-${summarizableLength} 楼 (共 ${unsummarizedCount} 楼)</span><br>`;
         } else {
-            asStatusHtml += `<span style="color: #27ae60;">已全部总结</span>`;
+            asStatusHtml += `<span style="color: #27ae60;">✓ 已全部总结</span><br>`;
         }
+
+        asStatusHtml += `<br><strong>🎯 自动触发:</strong><br>`;
+        asStatusHtml += `阈值: ${threshold} 楼`;
+
+        if (unsummarizedCount >= threshold) {
+            asStatusHtml += `<br><span style="color: #e74c3c;">⚠️ 已达阈值</span>`;
+        } else {
+            asStatusHtml += ` (还需 ${threshold - unsummarizedCount} 楼)`;
+        }
+
         $('#as_summary_status').html(asStatusHtml);
 
         // 同时追加到详细状态显示
@@ -3008,14 +3102,76 @@ function setupUIHandlers() {
 
             const startFloor = summarizedCount + 1;
             const endFloor = summarizableLength;
+            const pendingFloors = endFloor - startFloor + 1;
 
             if (startFloor > endFloor) {
                 toastr.warning('没有新消息需要总结', '自动总结');
                 return;
             }
 
-            toastr.info(`将总结 ${startFloor}-${endFloor} 楼`, '自动总结');
-            await executeSmallSummary(startFloor, endFloor, false);
+            // 🔧 追赶模式：检测待处理楼层是否过多
+            let effectiveThreshold = summarySettings.smallSummary.threshold || 20;
+
+            if (pendingFloors > 40) {
+                // 弹窗让用户选择临时阈值
+                const estimatedTasks = Math.ceil(pendingFloors / effectiveThreshold);
+
+                const catchupThreshold = await new Promise((resolve) => {
+                    const popup = document.createElement('div');
+                    popup.innerHTML = `
+                        <div style="padding: 15px; max-width: 400px;">
+                            <h3 style="margin-top:0; color: #a060f0;">⚡ 检测到大量待总结楼层</h3>
+                            <p>待处理: <strong>${pendingFloors}</strong> 楼 (${startFloor} - ${endFloor})</p>
+                            <p>当前阈值: ${effectiveThreshold} 楼/批次</p>
+                            <p>预计任务数: ${estimatedTasks} 个 (约 ${estimatedTasks} 次API调用)</p>
+                            <hr>
+                            <p><strong>选择本次追赶使用的阈值：</strong></p>
+                            <div style="display: flex; flex-direction: column; gap: 8px;">
+                                <button class="menu_button" data-value="40">40 楼/批次 (约 ${Math.ceil(pendingFloors / 40)} 次调用)</button>
+                                <button class="menu_button" data-value="60">60 楼/批次 (约 ${Math.ceil(pendingFloors / 60)} 次调用)</button>
+                                <button class="menu_button" data-value="100">100 楼/批次 (约 ${Math.ceil(pendingFloors / 100)} 次调用)</button>
+                                <button class="menu_button" data-value="${effectiveThreshold}">使用原阈值 ${effectiveThreshold} 楼</button>
+                                <button class="menu_button" data-value="cancel" style="background: #555;">取消</button>
+                            </div>
+                        </div>
+                    `;
+
+                    popup.querySelectorAll('button').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const value = btn.dataset.value;
+                            callGenericPopup('', POPUP_TYPE.TEXT, '', { okButton: 'hidden', cancelButton: 'hidden' });
+                            resolve(value === 'cancel' ? null : parseInt(value, 10));
+                        });
+                    });
+
+                    callGenericPopup(popup, POPUP_TYPE.TEXT, '', { okButton: 'hidden', cancelButton: 'hidden' });
+                });
+
+                if (catchupThreshold === null) {
+                    toastr.info('已取消总结', '自动总结');
+                    return;
+                }
+
+                effectiveThreshold = catchupThreshold;
+                console.log(`[自动总结] 用户选择追赶阈值: ${effectiveThreshold} 楼/批次`);
+            }
+
+            // 分批执行总结
+            let currentStart = startFloor;
+            let taskCount = 0;
+            const totalTasks = Math.ceil(pendingFloors / effectiveThreshold);
+
+            while (currentStart <= endFloor) {
+                taskCount++;
+                const batchEnd = Math.min(currentStart + effectiveThreshold - 1, endFloor);
+
+                toastr.info(`任务 ${taskCount}/${totalTasks}: 总结 ${currentStart}-${batchEnd} 楼`, '自动总结');
+                await executeSmallSummary(currentStart, batchEnd, false);
+
+                currentStart = batchEnd + 1;
+            }
+
+            toastr.success(`总结完成! 共处理 ${taskCount} 批`, '自动总结');
         } catch (error) {
             console.error('[自动总结] 执行小总结失败:', error);
             toastr.error(`执行失败: ${error.message}`, '自动总结');
