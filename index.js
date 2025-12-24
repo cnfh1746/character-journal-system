@@ -620,7 +620,6 @@ async function bindWorldbookToChat(worldbookName) {
         if (typeof TavernHelper !== 'undefined' && typeof TavernHelper.setChatLorebook === 'function') {
             await TavernHelper.setChatLorebook(worldbookName);
             console.log(`[角色日志] ✓ 使用TavernHelper绑定世界书: ${worldbookName}`);
-            toastr.success(`已绑定聊天世界书: ${worldbookName}`, '角色日志');
             return true;
         }
 
@@ -635,7 +634,6 @@ async function bindWorldbookToChat(worldbookName) {
             if (typeof context.saveMetadata === 'function') {
                 await context.saveMetadata();
                 console.log(`[角色日志] ✓ 已通过saveMetadata绑定世界书: ${worldbookName}`);
-                toastr.success(`已绑定聊天世界书: ${worldbookName}`, '角色日志');
 
                 // 触发UI刷新事件
                 if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
